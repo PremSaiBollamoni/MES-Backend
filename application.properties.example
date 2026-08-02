@@ -1,0 +1,40 @@
+# ---------------------------------------------------------------------------
+# TEMPLATE - copy this to the SERVER as "application.properties",
+# fill in the real values there, and never commit the filled-in copy.
+#
+# This repository is public. Any credential written into a tracked file is
+# visible to everyone and stays in git history even after being deleted, so
+# every real secret belongs in this file on the server instead.
+#
+# How the app picks it up (pick whichever suits the deployment):
+#
+#   Tomcat  - add to $CATALINA_HOME/bin/setenv.sh (setenv.bat on Windows):
+#               JAVA_OPTS="$JAVA_OPTS -Dspring.config.additional-location=file:/etc/smo/"
+#             then place this file at /etc/smo/application.properties
+#             and Spring Boot will merge it over the packaged defaults.
+#
+#   Jar     - java -jar smo.war \
+#               --spring.config.additional-location=file:/etc/smo/
+#
+# Values here OVERRIDE the defaults baked into application.properties.
+# ---------------------------------------------------------------------------
+
+# HRMS biometric attendance portal
+app.hrms.enabled=true
+app.hrms.base-url=https://hrms.thegttech.com
+app.hrms.username=CHANGE_ME
+app.hrms.password=CHANGE_ME
+
+# Database
+spring.datasource.url=jdbc:mysql://localhost:3306/smo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+spring.datasource.username=CHANGE_ME
+spring.datasource.password=CHANGE_ME
+
+# Signing / encryption keys - generate fresh values for production, do not reuse
+# the development defaults that ship in application.properties.
+#   openssl rand -base64 32
+app.encryption.key=CHANGE_ME
+app.jwt.secret=CHANGE_ME
+
+# Claude (Anthropic) AI report generation
+app.anthropic.api-key=CHANGE_ME
