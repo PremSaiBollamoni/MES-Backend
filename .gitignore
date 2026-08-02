@@ -31,3 +31,10 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Real secrets live only on the server - never commit the filled-in copy.
+application.properties
+
+# runtime logs
+*.log
+tools/*.log
