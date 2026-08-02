@@ -2,6 +2,7 @@ package com.antigravity.mes.controller;
 
 import com.antigravity.mes.hrms.HrmsClient;
 import com.antigravity.mes.hrms.HrmsSyncService;
+import com.antigravity.mes.web.ErrorCodes;
 import com.antigravity.mes.web.RequiresActivity;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -52,6 +53,6 @@ public class HrmsController {
 
     private ResponseEntity<Map<String, String>> unavailable() {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                .body(Map.of("error", "HRMS integration is not configured yet"));
+                .body(Map.of("code", ErrorCodes.HRMS_NOT_CONFIGURED, "error", ErrorCodes.fallback(ErrorCodes.HRMS_NOT_CONFIGURED)));
     }
 }
