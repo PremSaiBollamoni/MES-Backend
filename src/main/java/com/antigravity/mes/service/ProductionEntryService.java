@@ -11,7 +11,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.antigravity.mes.web.ErrorCodes;
+
+import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 
 /**
@@ -44,21 +48,74 @@ public class ProductionEntryService {
                 .toList();
     }
 
+    /**
+     * Logs one stretch of work.
+     *
+     * {@code startTime}/{@code endTime} are stored whenever given, so the entry can be
+     * placed in the right hourly slot when read back. Several entries inside one hour
+     * therefore each carry their real length instead of all claiming the full hour and
+     * inflating machine time.
+     *
+     * Duration prefers an explicit {@code timeOnMachineMinutes}: live tracking measures
+     * elapsed time to the second, which is finer than whole minutes derived from two
+     * clock times. Only when no explicit duration is supplied is it computed from the
+     * times - that is the hourly-slot flow, where the clock is all the supervisor enters.
+     */
     @Transactional
-    public ProductionEntryResponse logEntry(Long employeeId, Long stationId, LocalDate shiftDate, int piecesProduced, double timeOnMachineMinutes, Long enteredByEmployeeId) {
+    public ProductionEntryResponse logEntry(
+            Long employeeId,
+            Long stationId,
+            LocalDate shiftDate,
+            LocalTime startTime,
+            LocalTime endTime,
+            int piecesProduced,
+            Double timeOnMachineMinutes,
+            Long enteredByEmployeeId) {
+
         if (piecesProduced < 0) {
-            throw new IllegalArgumentException("Pieces produced cannot be negative");
+            throw new IllegalArgumentException(ErrorCodes.PIECES_NEGATIVE);
         }
-        if (timeOnMachineMinutes <= 0) {
-            throw new IllegalArgumentException("Time on machine must be greater than zero");
+
+        // A supplied end-before-start is a mistake worth rejecting even when the caller
+        // also passes its own measured duration.
+        if (startTime != null && endTime != null && !endTime.isAfter(startTime)) {
+            throw new IllegalArgumentException(ErrorCodes.END_BEFORE_START);
         }
+
+        // One person cannot be at two stations at once, and an hour holds 60 minutes and no
+        // more. Without this an hour could accumulate several entries each claiming the full
+        // 60 minutes, which silently understates efficiency for every figure derived from it.
+        // Enforced here rather than only in the app so a stale client cannot corrupt the data.
+        if (startTime != null && endTime != null) {
+            boolean clashes = productionEntryRepository.findByEmployeeIdAndShiftDate(employeeId, shiftDate).stream()
+                    .anyMatch(existing -> existing.getStartTime() != null
+                            && existing.getEndTime() != null
+                            && startTime.isBefore(existing.getEndTime())
+                            && existing.getStartTime().isBefore(endTime));
+            if (clashes) {
+                throw new IllegalArgumentException(ErrorCodes.TIME_OVERLAP);
+            }
+        }
+
+        final double minutes;
+        if (timeOnMachineMinutes != null) {
+            minutes = timeOnMachineMinutes;
+        } else if (startTime != null && endTime != null) {
+            minutes = Duration.between(startTime, endTime).toMinutes();
+        } else {
+            throw new IllegalArgumentException(ErrorCodes.TIME_REQUIRED);
+        }
+        if (minutes <= 0) {
+            throw new IllegalArgumentException(ErrorCodes.TIME_NOT_POSITIVE);
+        }
+
         Employee employee = employeeRepository.findById(employeeId)
-                .orElseThrow(() -> new IllegalArgumentException("Employee not found: " + employeeId));
+                .orElseThrow(() -> new IllegalArgumentException(ErrorCodes.EMPLOYEE_NOT_FOUND));
         Station station = stationRepository.findById(stationId)
-                .orElseThrow(() -> new IllegalArgumentException("Station not found: " + stationId));
+                .orElseThrow(() -> new IllegalArgumentException(ErrorCodes.STATION_NOT_FOUND));
 
         double samEarned = piecesProduced * station.getSam();
-        double efficiencyPct = (samEarned / timeOnMachineMinutes) * 100;
+        double efficiencyPct = (samEarned / minutes) * 100;
 
         // Always a new row, never an upsert - an operator can legitimately work the same
         // station more than once in a day (e.g. two separate batches), and each is its own
@@ -68,8 +125,10 @@ public class ProductionEntryService {
         entry.setEmployee(employee);
         entry.setStation(station);
         entry.setShiftDate(shiftDate);
+        entry.setStartTime(startTime);
+        entry.setEndTime(endTime);
         entry.setPiecesProduced(piecesProduced);
-        entry.setTimeOnMachineMinutes(timeOnMachineMinutes);
+        entry.setTimeOnMachineMinutes(minutes);
         entry.setSamEarned(samEarned);
         entry.setEfficiencyPct(efficiencyPct);
         entry.setEnteredByEmployeeId(enteredByEmployeeId);
@@ -95,6 +154,8 @@ public class ProductionEntryService {
                 entry.getStation().getStationNumber(),
                 entry.getStation().getOperationName(),
                 entry.getShiftDate(),
+                entry.getStartTime(),
+                entry.getEndTime(),
                 entry.getPiecesProduced(),
                 entry.getTimeOnMachineMinutes(),
                 entry.getSamEarned(),
