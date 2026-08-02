@@ -52,13 +52,13 @@ public class RoleAuthorizationInterceptor implements HandlerInterceptor {
 
         Optional<TokenPrincipal> principal = jwtService.validate(authHeader.substring(7));
         if (principal.isEmpty()) {
-            reject(response, HttpStatus.UNAUTHORIZED, "Invalid or expired session - please log in again");
+            reject(response, HttpStatus.UNAUTHORIZED, ErrorCodes.SESSION_INVALID);
             return false;
         }
 
         Optional<Role> role = roleRepository.findByRoleName(principal.get().role());
         if (role.isEmpty() || !role.get().isActive() || !role.get().canAccess(required.value())) {
-            reject(response, HttpStatus.FORBIDDEN, "You do not have access to this feature");
+            reject(response, HttpStatus.FORBIDDEN, ErrorCodes.NO_ACCESS);
             return false;
         }
 
@@ -67,9 +67,15 @@ public class RoleAuthorizationInterceptor implements HandlerInterceptor {
         return true;
     }
 
-    private void reject(HttpServletResponse response, HttpStatus status, String message) throws Exception {
+    private void reject(HttpServletResponse response, HttpStatus status, String codeOrMessage) throws Exception {
         response.setStatus(status.value());
         response.setContentType("application/json");
-        response.getWriter().write("{\"error\":\"" + message + "\"}");
+        // Codes travel alongside an English fallback so the app can translate; anything
+        // that is not a code (e.g. a malformed header) goes out as a plain message.
+        if (codeOrMessage.startsWith("ERR_")) {
+            response.getWriter().write("{\"code\":\"" + codeOrMessage + "\",\"error\":\"" + ErrorCodes.fallback(codeOrMessage) + "\"}");
+        } else {
+            response.getWriter().write("{\"error\":\"" + codeOrMessage + "\"}");
+        }
     }
 }
