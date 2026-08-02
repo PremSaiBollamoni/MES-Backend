@@ -1,87 +1,293 @@
-<div align="center">
+# GTMES Backend
 
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=32&duration=3000&pause=1000&color=0E7C86&center=true&vCenter=true&width=600&lines=PALMS+Backend+%E2%80%93+MES+Engine;Spring+Boot+%2B+MySQL+%2B+Claude+AI;Production-grade+Factory+API" alt="Typing SVG" />
+REST API for **GTMES** — the GramTarang Garments Manufacturing Execution System. Serves the
+Flutter mobile client with production tracking, workforce management, biometric attendance
+integration and generated analytical reports.
 
-<br/>
-
-[![Java](https://img.shields.io/badge/Java-21-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white)](https://openjdk.org)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.1-6DB33F?style=for-the-badge&logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
-[![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?style=for-the-badge&logo=mysql&logoColor=white)](https://www.mysql.com)
-[![Flyway](https://img.shields.io/badge/Flyway-Migrations-CC0200?style=for-the-badge&logo=flyway&logoColor=white)](https://flywaydb.org)
-[![Claude](https://img.shields.io/badge/Claude-AI%20Reports-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](https://www.anthropic.com)
-
-**The API and business logic behind PALMS — a real-time Manufacturing Execution System for garment factories.**
-
-</div>
+| | |
+|---|---|
+| **Runtime** | Java 17 · Spring Boot 3.3.1 |
+| **Packaging** | WAR (`smo.war`) deployed to an external Tomcat |
+| **Database** | MySQL 8, schema owned by Flyway (25 migrations) |
+| **Production** | `https://smobza.thegttech.com` |
 
 ---
 
-## What is this?
+## Architecture
 
-This is the **backend** for **PALMS** (Parallel Assembly Line Management System): a Spring Boot service that powers production tracking, workforce management, stock control, and AI-driven analytics for a garment manufacturing floor — serving the [Flutter frontend](https://github.com/PremSaiBollamoni/MES-Frontend) across Android, Windows, and Web.
+Layered Spring MVC. Requests pass through an authorization interceptor before reaching a
+controller; controllers delegate to services, which own all business logic and calculation;
+repositories handle persistence through Spring Data JPA.
 
-Built as a real internal tool, not a tutorial project: role-based authorization on every endpoint, schema evolution entirely via versioned Flyway migrations, and an AI reporting pipeline that is architecturally forbidden from fabricating data.
+```
+HTTP request
+  │
+  ├─ RoleAuthorizationInterceptor   validate JWT → resolve employee → check @RequiresActivity
+  ├─ Controller                     request/response mapping only
+  ├─ Service                        business rules, calculations, transactions
+  ├─ Repository                     Spring Data JPA
+  └─ MySQL
+```
 
-## Highlights
+Two outbound integrations sit alongside this: the **HRMS client** (biometric attendance and
+employee master data, read-only) and the **report pipeline** (aggregate real data → narrate →
+render PDF).
 
-- 🔐 **Custom JWT authentication + activity-based authorization** — every endpoint is gated by a named "activity" tied to the caller's role, enforced by a request interceptor, not client-side trust.
-- 🏭 **Full production domain model** — stations, SAM/target-based station design, operator allocation, multi-operator team tracking, attendance sync from an external HRMS, WIP/bundle tracking, and 4-tier stock availability.
-- 🤖 **Claude-powered report generation** — aggregates real production/stock/attendance/performance metrics into a single source-of-truth JSON, hands it to Claude (Haiku 4.5) with an explicit "never invent a number, omit what isn't tracked" contract, and renders the result server-side to a downloadable PDF (jsoup-sanitized HTML → Flying Saucer/OpenPDF).
-- 🗄️ **Flyway-owned schema** — 24+ sequential migrations, Hibernate locked to `validate` so the schema can never silently drift from what's reviewed and versioned.
-- 🔒 **Field-level encryption** — sensitive employee fields (address, emergency contact) are AES-256-GCM encrypted at the application layer, not just at rest.
-- 🌐 **External HRMS integration** — pulls biometric attendance data from a real factory HRMS portal on a scheduled sync.
+Every derived figure — efficiency, standard minutes, wages, classification — is computed
+server-side. The client never calculates them, so two devices cannot disagree about a number.
 
-## Tech Stack
+### Package layout
 
-| Layer | Technology |
+```
+src/main/java/com/antigravity/mes/
+├── controller/   15 REST controllers
+├── service/      12 business services
+├── repository/   Spring Data JPA repositories
+├── model/        JPA entities
+├── dto/          request/response records
+├── security/     JWT issue/validate, field encryption, password hashing
+├── web/          activity catalogue, @RequiresActivity, interceptor, error codes
+├── exception/    NotFound / Conflict + global handler
+├── hrms/         biometric HRMS client and sync services
+└── report/       aggregation, narration, PDF rendering, controller
+
+src/main/resources/
+├── application.properties
+└── db/migration/ V1 … V25 Flyway migrations
+```
+
+---
+
+## Tech stack
+
+| Concern | Library |
 |---|---|
-| Language | Java 21 |
-| Framework | Spring Boot 3.3.1 (Web, Data JPA) |
-| Database | MySQL 8 |
-| Migrations | Flyway |
-| Auth | JWT (`jjwt`), custom `RoleAuthorizationInterceptor` |
-| AI | Anthropic Java SDK (Claude Haiku 4.5) |
-| PDF Rendering | Flying Saucer (OpenPDF) + jsoup HTML sanitization |
-| Build | Maven |
+| Framework | Spring Boot 3.3.1 (`web`, `data-jpa`) |
+| Servlet container | Tomcat — scope `provided`, supplied by the deployment target |
+| Database | MySQL 8 via `mysql-connector-j` |
+| Migrations | Flyway (`flyway-core`, `flyway-mysql`) |
+| Tokens | JJWT 0.12.6 |
+| Password hashing | `spring-security-crypto` (BCrypt) |
+| Report narration | `anthropic-java` 2.34.0 |
+| PDF rendering | Flying Saucer 9.3.2 + jsoup 1.18.3 |
 
-## Architecture at a Glance
+---
 
-```
-Controller  →  @RequiresActivity("X")-gated REST endpoints
-Service     →  business logic, one per domain (Station, Attendance, Report, ...)
-Repository  →  Spring Data JPA
-Model       →  JPA entities
-db/migration → versioned Flyway SQL, the single source of schema truth
-report/      → data aggregation + Claude prompt orchestration + PDF rendering
-```
+## Prerequisites
 
-## Getting Started
+- **JDK 17** — the WAR targets Java 17. A newer JDK compiles, but the artifact will not run on
+  the production server's JRE 17.
+- **MySQL 8** with a database and user created.
+- **Tomcat 10.1+** for WAR deployment only; local development uses the embedded server.
+
+Maven is not required — the repository includes the Maven Wrapper (`./mvnw`).
+
+## Installation
 
 ```bash
-# 1. Configure environment (see application.properties for the full list)
-export DB_URL="jdbc:mysql://localhost:3306/MES"
-export DB_USERNAME="mes_app_user"
-export DB_PASSWORD="..."
-export ANTHROPIC_API_KEY="..."   # optional — enables AI report generation
+git clone <repository-url>
+cd backend
+./mvnw dependency:go-offline
+```
 
-# 2. Run
+## Database configuration
+
+```sql
+CREATE DATABASE smo CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'smo'@'localhost' IDENTIFIED BY '<password>';
+GRANT ALL PRIVILEGES ON smo.* TO 'smo'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+Flyway creates and populates every table on first startup. Do not create tables by hand:
+`spring.jpa.hibernate.ddl-auto` is `validate`, so the application refuses to start if the
+schema does not match the entities.
+
+---
+
+## Environment variables
+
+Every setting is an environment variable with a fallback in `application.properties`.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PORT` | `8080` | HTTP port |
+| `DB_URL` | `jdbc:mysql://localhost:3306/smo?...` | JDBC connection string |
+| `DB_USERNAME` | `smo` | Database user |
+| `DB_PASSWORD` | *(see note)* | Database password |
+| `DB_POOL_SIZE` | `10` | HikariCP maximum pool size |
+| `JPA_SHOW_SQL` | `false` | Log generated SQL |
+| `LOG_PATH` | `/opt/tomcat/logs/smo-backend.log` | Log file location |
+| `APP_LOG_LEVEL` | `INFO` | Level for `com.antigravity.mes` |
+| `APP_JWT_SECRET` | *(see note)* | HMAC signing key for tokens |
+| `APP_JWT_EXPIRATION_MINUTES` | `480` | Session token lifetime |
+| `APP_ENCRYPTION_KEY` | *(see note)* | Key for encrypted entity fields |
+| `HRMS_ENABLED` | `true` | Enable biometric attendance integration |
+| `HRMS_BASE_URL` | `https://hrms.thegttech.com` | HRMS endpoint |
+| `HRMS_USERNAME` | *(empty)* | HRMS credential — integration self-disables if unset |
+| `HRMS_PASSWORD` | *(empty)* | HRMS credential |
+| `ANTHROPIC_REPORTS_ENABLED` | `true` | Enable report generation |
+| `ANTHROPIC_API_KEY` | *(empty)* | Report narration credential |
+
+> **Security note.** `application.properties` is tracked in version control, so it deliberately
+> carries **no** default for `DB_PASSWORD`, `APP_JWT_SECRET` or `APP_ENCRYPTION_KEY` — supply
+> all three as environment variables or in external configuration. Never commit them, and never
+> commit `HRMS_*` or `ANTHROPIC_API_KEY`.
+
+Running locally therefore needs the database password supplied:
+
+```bash
+DB_PASSWORD='<password>' ./mvnw spring-boot:run
+```
+
+For deployment, place overrides in a file **named `application.properties`** outside the WAR:
+
+```
+--spring.config.additional-location=file:/opt/tomcat/conf/
+```
+
+A file named `application-secrets.properties` will **not** load — Spring reads the suffix as a
+profile name and ignores the file silently. See `application.properties.example`.
+
+---
+
+## Running
+
+```bash
 ./mvnw spring-boot:run
 ```
 
-Schema is created automatically on first run via Flyway. No manual SQL required.
+With integration credentials supplied inline:
 
-## Deployment
+```bash
+HRMS_USERNAME=<user> HRMS_PASSWORD=<pass> ANTHROPIC_API_KEY=<key> ./mvnw spring-boot:run
+```
 
-Includes a multi-stage `Dockerfile` (Maven build → slim JRE runtime) — deploys cleanly to any container platform (Railway, Render, Fly.io, etc.) with the same environment variables as local dev. `server.port` respects the `PORT` env var for PaaS compatibility.
+Verify with `curl http://localhost:8080/api/auth/health`.
 
-## Related
+## Build
 
-- **Frontend** — [MES-Frontend](https://github.com/PremSaiBollamoni/MES-Frontend) (Flutter, Android/Windows/Web)
+```bash
+./mvnw clean package -DskipTests    # → target/smo.war
+```
+
+`spring-boot-starter-tomcat` is `provided` and `MesApplication` extends
+`SpringBootServletInitializer`, so the one artifact both runs standalone and deploys to Tomcat.
 
 ---
 
-<div align="center">
+## Authentication & authorization
 
-Built by **Prem Sai** — engineered for a real, running factory floor.
+Login is two-stage, because an employee may hold several roles.
 
-</div>
+1. `POST /api/auth/login` — returns a full session token (single role) or
+   `requiresRoleSelection: true` with a short-lived `preAuthToken` and the roles held.
+2. `POST /api/auth/select-role` — exchanges that token plus a `roleName` for a session token
+   scoped to the chosen role.
+
+Send it as `Authorization: Bearer <token>` on every subsequent request.
+
+Authorization is **activity-based**, not role-based. Each role owns a JSON list of permitted
+activities; controller methods declare what they need with `@RequiresActivity("OPERATIONS")`,
+and `RoleAuthorizationInterceptor` rejects the request when the active role lacks it.
+
+Activities: `SPLASH`, `LOGIN`, `DASHBOARD`, `PROFILE`, `EMPLOYEE_LIST`, `EMPLOYEE_DETAIL`,
+`EMPLOYEE_FORM`, `ROLE_LIST`, `ROLE_FORM`, `ATTENDANCE`, `STATION_LIST`, `STATION_FORM`,
+`OPERATIONS`, `MY_PRODUCTION`, `REPORTS`.
+
+## API documentation
+
+Full reference with parameters and worked examples: **[docs/API.md](docs/API.md)**.
+Base path `/api`; all controllers set `@CrossOrigin(origins = "*")`.
+
+| Group | Base | # | Group | Base | # |
+|---|---|---|---|---|---|
+| Authentication | `/api/auth` | 4 | Tracking | `/api/tracking` | 3 |
+| Employees | `/api/employees` | 11 | Production entries | `/api/production-entries` | 3 |
+| Roles | `/api/roles` | 7 | Station status | `/api/station-status` | 1 |
+| Stations | `/api/stations` | 6 | Stock availability | `/api/stock-availability` | 2 |
+| Attendance | `/api/attendance` | 4 | Stock position | `/api/stock-position` | 2 |
+| HRMS | `/api/hrms` | 3 | WIP / bundles | `/api/wip` | 5 |
+| Allocations | `/api/allocations` | 4 | Dashboard | `/api/dashboard` | 1 |
+| Profile | `/api/profile` | 3 | Reports | `/api/reports` | 3 |
+
+---
+
+## Error handling
+
+`GlobalExceptionHandler` maps exceptions to a consistent JSON body:
+
+| Exception | Status |
+|---|---|
+| `NotFoundException` | 404 |
+| `ConflictException` | 409 |
+| `IllegalArgumentException` | 400 |
+| any other `Exception` | 500 |
+
+Validation failures carry a stable code from `ErrorCodes`, so the client can translate rather
+than display server English:
+
+```json
+{ "code": "ERR_TIME_OVERLAP", "error": "This time overlaps another entry already logged for this operator" }
+```
+
+Codes: `ERR_NO_ACCESS`, `ERR_SESSION_INVALID`, `ERR_PIECES_NEGATIVE`, `ERR_TIME_NOT_POSITIVE`,
+`ERR_TIME_REQUIRED`, `ERR_END_BEFORE_START`, `ERR_TIME_OVERLAP`, `ERR_EMPLOYEE_NOT_FOUND`,
+`ERR_STATION_NOT_FOUND`, `ERR_HRMS_NOT_CONFIGURED`, `ERR_HRMS_UNREACHABLE`,
+`ERR_HRMS_REJECTED`, `ERR_REPORTS_DISABLED`, `ERR_REPORT_FAILED`. Responses without a `code`
+carry `error` only.
+
+## Logging
+
+SLF4J over Spring Boot's Logback. Writes to `LOG_PATH` and the console. Root `INFO`,
+application level from `APP_LOG_LEVEL`, Flyway at `INFO` so applied migrations are always
+visible at startup.
+
+---
+
+## Deployment
+
+Build the WAR, then on the server:
+
+```bash
+mysqldump -u smo -p smo > ~/smo-backup-$(date +%F).sql   # migrations may alter the schema
+sudo systemctl stop tomcat
+sudo rm -rf /opt/tomcat/webapps/smo /opt/tomcat/webapps/smo.war
+sudo rm -rf /opt/tomcat/work/Catalina/localhost/smo      # required — see troubleshooting
+sudo cp smo.war /opt/tomcat/webapps/smo.war
+sudo chown tomcat:tomcat /opt/tomcat/webapps/smo.war
+sudo systemctl start tomcat
+sudo tail -f /opt/tomcat/logs/catalina.out
+```
+
+Look for `Successfully applied N migration(s)` and `Started MesApplication`. External
+configuration lives at `/opt/tomcat/conf/application.properties` and is untouched by a
+redeploy. In production, nginx proxies the domain root onto the `/smo` context, so clients call
+the bare domain with no path suffix.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Connects to the wrong database | A stale `DB_URL` exported in `/opt/tomcat/bin/setenv.sh` overrides the config file. |
+| WAR deploys, nothing responds | Built with a newer JDK than the server JRE. Check `<java.version>` and `java -version`. |
+| Old behaviour after redeploy | Tomcat served a cached expansion. Remove `webapps/smo/` **and** `work/Catalina/localhost/smo/`. |
+| External config ignored | Named `application-<x>.properties`, read as a profile. Rename to `application.properties`. |
+| `401` on HRMS-backed endpoints | Blank `HRMS_USERNAME`/`HRMS_PASSWORD`; the client reports itself disabled. |
+| HRMS unreachable from the server | Public DNS may not resolve internally — add a hosts entry for the private address. |
+| Startup fails validating schema | `ddl-auto=validate` found a mismatch. Let Flyway migrate; never alter tables by hand. |
+| Flyway `max_user_connections` | Lower `DB_POOL_SIZE` to fit the hosting plan's limit. |
+
+---
+
+## Contributing
+
+- **Keep files small and single-purpose** — split before writing, not by refactoring after.
+- **Controllers stay thin.** Business logic and all calculation belong in services.
+- **Schema changes are migrations.** Add `V<n>__description.sql`; never edit an applied
+  migration and never alter tables manually.
+- **A new screen is a new activity.** Add it to `ActivityCatalog`, grant it to roles in the
+  same migration, and annotate the endpoints with `@RequiresActivity`.
+- **User-facing validation uses `ErrorCodes`,** never hardcoded English.
+- **No secrets in committed files.**
+- Run `./mvnw clean package` before opening a pull request.
