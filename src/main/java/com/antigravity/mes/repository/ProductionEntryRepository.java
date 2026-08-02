@@ -11,4 +11,6 @@ import java.util.List;
 public interface ProductionEntryRepository extends JpaRepository<ProductionEntry, Long> {
     List<ProductionEntry> findByShiftDate(LocalDate shiftDate);
     List<ProductionEntry> findByEmployeeIdAndShiftDateBetweenOrderByShiftDateDesc(Long employeeId, LocalDate from, LocalDate to);
+
+    List<ProductionEntry> findByEmployeeIdAndShiftDate(Long employeeId, LocalDate shiftDate);
 }
