@@ -138,8 +138,14 @@ public class TrackingSessionService {
         session = trackingSessionRepository.save(session);
 
         for (Employee employee : session.getEmployees()) {
+            // The session already knows exactly when work started and stopped, so record
+            // those clock times on the entry too - that is what lets the hourly view show
+            // tracked work in the right slot alongside manually logged entries. The
+            // elapsed minutes are still passed explicitly, since they are measured to the
+            // second and are more accurate than re-deriving them from whole minutes.
             productionEntryService.logEntry(
                     employee.getId(), session.getStation().getId(), session.getShiftDate(),
+                    session.getStartedAt().toLocalTime(), stoppedAt.toLocalTime(),
                     completed, elapsedMinutes, stoppedBy);
         }
 
