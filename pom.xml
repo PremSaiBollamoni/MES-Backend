@@ -11,6 +11,7 @@
 	<groupId>com.antigravity</groupId>
 	<artifactId>mes</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
+	<packaging>war</packaging>
 	<name>mes</name>
 	<description>Manufacturing Execution System</description>
 	<url/>
@@ -27,7 +28,11 @@
 		<url/>
 	</scm>
 	<properties>
-		<java.version>21</java.version>
+		<!-- 17, not 21, to match the production server's JRE - Java refuses to load
+		     bytecode newer than itself, so a 21-target build fails on a 17 runtime
+		     with UnsupportedClassVersionError. Nothing here needs Java 21 features.
+		     Raise this only in step with the server's installed JDK. -->
+		<java.version>17</java.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -37,6 +42,14 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
+		</dependency>
+		<!-- Marked provided so the embedded Tomcat is excluded from the WAR - the
+		     external servlet container supplies its own. Harmless when running the
+		     app directly via main()/spring-boot:run. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-tomcat</artifactId>
+			<scope>provided</scope>
 		</dependency>
 
 		<dependency>
@@ -96,6 +109,7 @@
 	</dependencies>
 
 	<build>
+		<finalName>smo</finalName>
 		<plugins>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
