@@ -5,11 +5,13 @@ import com.antigravity.mes.hrms.AttendanceSyncService;
 import com.antigravity.mes.hrms.HrmsClient;
 import com.antigravity.mes.model.AttendanceRecord;
 import com.antigravity.mes.repository.AttendanceRecordRepository;
+import com.antigravity.mes.web.ErrorCodes;
 import com.antigravity.mes.web.RequiresActivity;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.time.LocalDate;
@@ -44,6 +46,8 @@ public class AttendanceController {
             return ResponseEntity.ok(hrmsClient.getLiveStatus());
         } catch (ResourceAccessException e) {
             return unreachable();
+        } catch (HttpClientErrorException.Unauthorized e) {
+            return rejected();
         }
     }
 
@@ -58,6 +62,8 @@ public class AttendanceController {
             return ResponseEntity.ok(hrmsClient.getDailyAttendance(parsed));
         } catch (ResourceAccessException e) {
             return unreachable();
+        } catch (HttpClientErrorException.Unauthorized e) {
+            return rejected();
         }
     }
 
@@ -76,6 +82,8 @@ public class AttendanceController {
             return ResponseEntity.ok(result);
         } catch (ResourceAccessException e) {
             return unreachable();
+        } catch (HttpClientErrorException.Unauthorized e) {
+            return rejected();
         }
     }
 
@@ -107,12 +115,19 @@ public class AttendanceController {
 
     private ResponseEntity<Map<String, String>> unavailable() {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                .body(Map.of("error", "HRMS integration is not configured yet"));
+                .body(Map.of("code", ErrorCodes.HRMS_NOT_CONFIGURED, "error", ErrorCodes.fallback(ErrorCodes.HRMS_NOT_CONFIGURED)));
     }
 
     /** The HRMS portal itself is unreachable right now (DNS/network/timeout) - not a config problem. */
     private ResponseEntity<Map<String, String>> unreachable() {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                .body(Map.of("error", "Couldn't reach the HRMS attendance portal - it may be offline or unreachable from this network. Try again shortly."));
+                .body(Map.of("code", ErrorCodes.HRMS_UNREACHABLE, "error", ErrorCodes.fallback(ErrorCodes.HRMS_UNREACHABLE)));
+    }
+
+    /** HRMS answered but refused the login. Without this the raw Spring exception text
+     * ("401 Unauthorized: [no body]") reached the UI, which tells a factory user nothing. */
+    private ResponseEntity<Map<String, String>> rejected() {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(Map.of("code", ErrorCodes.HRMS_REJECTED, "error", ErrorCodes.fallback(ErrorCodes.HRMS_REJECTED)));
     }
 }
