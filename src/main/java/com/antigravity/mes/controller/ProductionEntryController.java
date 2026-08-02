@@ -34,6 +34,7 @@ public class ProductionEntryController {
             @RequestBody LogProductionEntryRequest request) {
         return ResponseEntity.ok(productionEntryService.logEntry(
                 request.employeeId(), request.stationId(), request.shiftDate(),
+                request.startTime(), request.endTime(),
                 request.piecesProduced(), request.timeOnMachineMinutes(), employeeId));
     }
 
