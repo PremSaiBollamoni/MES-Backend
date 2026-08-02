@@ -76,8 +76,16 @@ public class HrmsClient {
         this.enabled = enabled;
     }
 
+    /** Credentials are checked here, not just the flag: with the flag on but a blank
+     * username/password (e.g. an external config file that silently wasn't loaded) the
+     * client would otherwise send empty credentials and surface HRMS's opaque 401 as if
+     * the account were wrong. Treating that as "not configured" points at the real cause. */
     public boolean isEnabled() {
-        return enabled;
+        return enabled && !isBlank(username) && !isBlank(password);
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     public List<HrmsEmployeeOut> listEmployees(boolean activeOnly) {
@@ -189,6 +197,12 @@ public class HrmsClient {
         if (!enabled) {
             throw new IllegalStateException(
                     "HRMS integration is disabled - set HRMS_ENABLED=true and HRMS_USERNAME/HRMS_PASSWORD to enable it");
+        }
+        if (isBlank(username) || isBlank(password)) {
+            throw new IllegalStateException(
+                    "HRMS is enabled but has no credentials - app.hrms.username/password are blank. "
+                            + "Check that the external config file is actually being loaded (a file named "
+                            + "application-<name>.properties is read as a PROFILE, not as plain extra config).");
         }
     }
 
