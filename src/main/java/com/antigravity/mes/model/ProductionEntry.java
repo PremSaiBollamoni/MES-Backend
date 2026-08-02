@@ -6,12 +6,17 @@ import org.hibernate.generator.EventType;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 
-/** One operator's piece count at one station for one day, entered by the Production
- * Supervisor (operators have no app access to enter their own). SAM earned and
- * efficiency % are computed at write time from the station's SAM (PALMS §10). */
+/** One operator's piece count at one station for one stretch of one day, entered by the
+ * Production Supervisor (operators have no app access to enter their own). SAM earned and
+ * efficiency % are computed at write time from the station's SAM (PALMS §10).
+ *
+ * No unique constraint on (employee, station, date): V22 removed it deliberately, since an
+ * operator can legitimately work the same station several times in a day and each stretch
+ * is its own entry rather than an overwrite of the last. */
 @Entity
-@Table(name = "production_entries", uniqueConstraints = @UniqueConstraint(columnNames = {"employee_id", "station_id", "shift_date"}))
+@Table(name = "production_entries")
 public class ProductionEntry {
 
     @Id
@@ -28,6 +33,15 @@ public class ProductionEntry {
 
     @Column(name = "shift_date", nullable = false)
     private LocalDate shiftDate;
+
+    /** Clock time this stretch of work started and finished. Nullable because entries
+     * logged before hourly slots existed have no recorded time - the UI groups those
+     * under the day rather than an hour. */
+    @Column(name = "start_time")
+    private LocalTime startTime;
+
+    @Column(name = "end_time")
+    private LocalTime endTime;
 
     @Column(name = "pieces_produced", nullable = false)
     private int piecesProduced;
@@ -55,6 +69,12 @@ public class ProductionEntry {
 
     public Station getStation() { return station; }
     public void setStation(Station station) { this.station = station; }
+
+    public LocalTime getStartTime() { return startTime; }
+    public void setStartTime(LocalTime startTime) { this.startTime = startTime; }
+
+    public LocalTime getEndTime() { return endTime; }
+    public void setEndTime(LocalTime endTime) { this.endTime = endTime; }
 
     public LocalDate getShiftDate() { return shiftDate; }
     public void setShiftDate(LocalDate shiftDate) { this.shiftDate = shiftDate; }
