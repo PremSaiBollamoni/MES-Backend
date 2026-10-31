@@ -81,6 +81,9 @@ public class ProductionEntryService {
         if (piecesProduced < 0) {
             throw new IllegalArgumentException(ErrorCodes.PIECES_NEGATIVE);
         }
+        if (colour == null || colour.isBlank()) {
+            throw new IllegalArgumentException(ErrorCodes.COLOUR_REQUIRED);
+        }
 
         // A supplied end-before-start is a mistake worth rejecting even when the caller
         // also passes its own measured duration.
@@ -128,6 +131,7 @@ public class ProductionEntryService {
         // log entry. Collapsing them into one row per employee+station+day used to silently
         // overwrite everything but the last visit.
         ProductionEntry entry = new ProductionEntry();
+        entry.setFactoryId(station.getFactoryId());
         entry.setEmployee(employee);
         entry.setStation(station);
         entry.setShiftDate(shiftDate);
@@ -166,6 +170,11 @@ public class ProductionEntryService {
         int pieces = piecesProduced != null ? piecesProduced : entry.getPiecesProduced();
         if (pieces < 0) {
             throw new IllegalArgumentException(ErrorCodes.PIECES_NEGATIVE);
+        }
+        // null means "leave colour as-is" (see below), but an explicitly blank value is a
+        // caller trying to clear it, which isn't allowed now that it's mandatory.
+        if (colour != null && colour.isBlank()) {
+            throw new IllegalArgumentException(ErrorCodes.COLOUR_REQUIRED);
         }
 
         LocalTime newStart = startTime != null ? startTime : entry.getStartTime();

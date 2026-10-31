@@ -7,12 +7,15 @@ import java.time.LocalDateTime;
 
 /** One zone's stock position for one day: Opening + Additions - Dispatched = Closing (PALMS §6). */
 @Entity
-@Table(name = "daily_stock_positions", uniqueConstraints = @UniqueConstraint(columnNames = {"zone_code", "position_date"}))
+@Table(name = "daily_stock_positions", uniqueConstraints = @UniqueConstraint(columnNames = {"zone_code", "factory_id", "position_date"}))
 public class DailyStockPosition {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(name = "factory_id", nullable = false)
+    private Long factoryId;
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "zone_code", nullable = false)
@@ -41,6 +44,9 @@ public class DailyStockPosition {
     }
 
     public Long getId() { return id; }
+
+    public Long getFactoryId() { return factoryId; }
+    public void setFactoryId(Long factoryId) { this.factoryId = factoryId; }
 
     public StockZone getZone() { return zone; }
     public void setZone(StockZone zone) { this.zone = zone; }

@@ -15,8 +15,11 @@ public class Role {
     @Column(name = "role_id")
     private Long roleId;
 
-    @Column(name = "role_name", length = 50, nullable = false, unique = true)
+    @Column(name = "role_name", length = 50, nullable = false)
     private String roleName;
+
+    @Column(name = "factory_id")
+    private Long factoryId;
 
     /** Activity (screen) codes this role may access - see frontend/lib/activities/. */
     @Convert(converter = ActivityListConverter.class)
@@ -64,4 +67,23 @@ public class Role {
     public boolean canAccess(String activityCode) {
         return activities != null && activities.contains(activityCode);
     }
+
+    public Long getFactoryId() {
+        return factoryId;
+    }
+
+    public void setFactoryId(Long factoryId) {
+        this.factoryId = factoryId;
+    }
+
+    /**
+     * True only for the one system-wide SUPER_ADMIN role. Roles are otherwise global
+     * (shared by every factory, not duplicated per factory) - factory_id on a normal
+     * role is legacy/unused, kept only because SUPER_ADMIN also has a NULL factory_id
+     * and the column remains for that one row.
+     */
+    public boolean isSuperAdmin() {
+        return "SUPER_ADMIN".equals(roleName);
+    }
 }
+

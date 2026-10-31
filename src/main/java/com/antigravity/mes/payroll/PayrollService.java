@@ -3,6 +3,7 @@ package com.antigravity.mes.payroll;
 import com.antigravity.mes.model.EmployeeInfo;
 import com.antigravity.mes.model.ProductionEntry;
 import com.antigravity.mes.repository.EmployeeInfoRepository;
+import com.antigravity.mes.repository.EmployeeRepository;
 import com.antigravity.mes.repository.ProductionEntryRepository;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -33,14 +34,19 @@ public class PayrollService {
     @Autowired
     private EmployeeInfoRepository employeeInfoRepository;
 
+    @Autowired
+    private EmployeeRepository employeeRepository;
+
     /** The same rows the Excel sheet uses, as plain data - lets HR preview every operator's
-     * earnings breakdown in the app before committing to a download. */
-    public List<OperatorPayroll> previewPayroll(LocalDate startDate, LocalDate endDate) {
-        return buildRows(productionEntryRepository.findByShiftDateBetween(startDate, endDate));
+     * earnings breakdown in the app before committing to a download. Scoped to the caller's
+     * factory - this was previously unfiltered (findByShiftDateBetween across ALL factories),
+     * the same class of cross-factory leak found and fixed in EmployeeManagementService. */
+    public List<OperatorPayroll> previewPayroll(LocalDate startDate, LocalDate endDate, Long factoryId) {
+        return buildRows(productionEntryRepository.findByFactoryIdAndShiftDateBetween(factoryId, startDate, endDate));
     }
 
-    public byte[] generatePayrollSheet(LocalDate startDate, LocalDate endDate) {
-        List<ProductionEntry> entries = productionEntryRepository.findByShiftDateBetween(startDate, endDate);
+    public byte[] generatePayrollSheet(LocalDate startDate, LocalDate endDate, Long factoryId) {
+        List<ProductionEntry> entries = productionEntryRepository.findByFactoryIdAndShiftDateBetween(factoryId, startDate, endDate);
         List<OperatorPayroll> rows = buildRows(entries);
 
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
@@ -60,6 +66,11 @@ public class PayrollService {
         Map<Long, String> stationOperationName = new HashMap<>();
         Map<Long, Double> stationRate = new HashMap<>();
         Map<Long, Integer> stationOperatorCount = new HashMap<>();
+        // employeeId -> stationId -> names of whoever logged an entry into this group -
+        // usually the operator themselves, but a supervisor can log on someone else's
+        // behalf, and HR wants to know when that happened.
+        Map<Long, Map<Long, Set<String>>> perEmployeeStationLoggedBy = new LinkedHashMap<>();
+        Map<Long, String> loggerNameCache = new HashMap<>();
 
         for (ProductionEntry entry : entries) {
             Long employeeId = entry.getEmployee().getId();
@@ -77,6 +88,14 @@ public class PayrollService {
             double[] totals = stations.computeIfAbsent(stationId, k -> new double[2]);
             totals[0] += entry.getPiecesProduced();
             totals[1] += earned;
+
+            Long loggedByEmployeeId = entry.getEnteredByEmployeeId();
+            String loggerName = loggerNameCache.computeIfAbsent(loggedByEmployeeId,
+                    id -> employeeRepository.findById(id).map(e -> e.getName()).orElse("Unknown"));
+            perEmployeeStationLoggedBy
+                    .computeIfAbsent(employeeId, k -> new LinkedHashMap<>())
+                    .computeIfAbsent(stationId, k -> new LinkedHashSet<>())
+                    .add(loggerName);
         }
 
         List<OperatorPayroll> result = new ArrayList<>();
@@ -94,7 +113,8 @@ public class PayrollService {
                 // earnings/pieces, so it always matches what Station Management shows.
                 double rate = stationRate.get(stationId);
                 int operatorCount = stationOperatorCount.get(stationId);
-                lines.add(new OperationLine(stationOperationName.get(stationId), pieces, rate, earnings, operatorCount));
+                String loggedBy = String.join(", ", perEmployeeStationLoggedBy.get(employeeId).get(stationId));
+                lines.add(new OperationLine(stationOperationName.get(stationId), pieces, rate, earnings, operatorCount, loggedBy));
                 total += earnings;
             }
             EmployeeInfo info = employeeInfoRepository.findByEmployeeId(employeeId).orElse(null);
@@ -111,7 +131,7 @@ public class PayrollService {
         return result;
     }
 
-    record OperationLine(String operationName, int pieces, double rate, double earnings, int operatorCount) {}
+    record OperationLine(String operationName, int pieces, double rate, double earnings, int operatorCount, String loggedBy) {}
 
     record OperatorPayroll(String operatorName, List<OperationLine> operations, double totalEarnings,
                             String bankName, String bankAccountNumber, String ifscCode) {}

@@ -14,6 +14,9 @@ public class AttendanceRecord {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "factory_id", nullable = false)
+    private Long factoryId;
+
     @Column(name = "employee_id", nullable = false)
     private Long employeeId;
 
@@ -51,6 +54,10 @@ public class AttendanceRecord {
     private LocalDateTime syncedAt = LocalDateTime.now();
 
     public Long getId() { return id; }
+
+    public Long getFactoryId() { return factoryId; }
+
+    public void setFactoryId(Long factoryId) { this.factoryId = factoryId; }
 
     public Long getEmployeeId() { return employeeId; }
     public void setEmployeeId(Long employeeId) { this.employeeId = employeeId; }

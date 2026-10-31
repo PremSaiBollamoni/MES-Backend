@@ -43,6 +43,10 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
 		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-mail</artifactId>
+		</dependency>
 		<!-- Marked provided so the embedded Tomcat is excluded from the WAR - the
 		     external servlet container supplies its own. Harmless when running the
 		     app directly via main()/spring-boot:run. -->

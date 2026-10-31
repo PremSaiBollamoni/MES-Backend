@@ -56,14 +56,28 @@ public class RoleAuthorizationInterceptor implements HandlerInterceptor {
             return false;
         }
 
-        Optional<Role> role = roleRepository.findByRoleName(principal.get().role());
+        TokenPrincipal p = principal.get();
+
+        // SUPER_ADMIN bypass: check all activities since they manage the entire system
+        if (p.isSuperAdmin()) {
+            request.setAttribute("employeeId", p.employeeId());
+            request.setAttribute("role", p.role());
+            request.setAttribute("factoryId", p.factoryId());
+            request.setAttribute("isSuperAdmin", true);
+            return true;
+        }
+
+        // Roles are global - shared by every factory - so this is a plain name lookup.
+        Optional<Role> role = roleRepository.findByRoleName(p.role());
         if (role.isEmpty() || !role.get().isActive() || !role.get().canAccess(required.value())) {
             reject(response, HttpStatus.FORBIDDEN, ErrorCodes.NO_ACCESS);
             return false;
         }
 
-        request.setAttribute("employeeId", principal.get().employeeId());
-        request.setAttribute("role", principal.get().role());
+        request.setAttribute("employeeId", p.employeeId());
+        request.setAttribute("role", p.role());
+        request.setAttribute("factoryId", p.factoryId());
+        request.setAttribute("isSuperAdmin", false);
         return true;
     }
 

@@ -33,6 +33,7 @@ final class PayrollSheetWriter {
         sheet.setColumnWidth(7, 22 * 256);
         sheet.setColumnWidth(8, 20 * 256);
         sheet.setColumnWidth(9, 14 * 256);
+        sheet.setColumnWidth(10, 20 * 256);
 
         Styles styles = new Styles(workbook);
 
@@ -47,7 +48,7 @@ final class PayrollSheetWriter {
         for (PayrollService.OperatorPayroll operator : rows) {
             int firstRow = rowIndex;
             List<PayrollService.OperationLine> operations = operator.operations().isEmpty()
-                    ? List.of(new PayrollService.OperationLine("-", 0, 0, 0, 1))
+                    ? List.of(new PayrollService.OperationLine("-", 0, 0, 0, 1, "-"))
                     : operator.operations();
 
             CellStyle band = shaded ? styles.bodyShaded : styles.body;
@@ -66,6 +67,7 @@ final class PayrollSheetWriter {
                 setCell(row, 3, line.pieces(), bandCenter);
                 setCell(row, 4, line.rate(), bandCurrency);
                 setCell(row, 5, line.earnings(), bandCurrency);
+                setCell(row, 10, line.loggedBy(), band);
             }
             int lastRow = rowIndex - 1;
 
@@ -95,7 +97,7 @@ final class PayrollSheetWriter {
         }
 
         writeGrandTotalRow(sheet, styles, rowIndex, grandTotal);
-        sheet.setAutoFilter(new CellRangeAddress(headerRow, headerRow, 0, 9));
+        sheet.setAutoFilter(new CellRangeAddress(headerRow, headerRow, 0, 10));
     }
 
     private static String nullToDash(String value) {
@@ -121,7 +123,7 @@ final class PayrollSheetWriter {
         Row header = sheet.createRow(rowIndex);
         header.setHeightInPoints(22);
         String[] headers = {"S.No", "Operator Name", "Operation", "Pieces", "Rate (₹)", "Earnings (₹)", "Total Earnings (₹)",
-                "Bank Name", "Account Number", "IFSC Code"};
+                "Bank Name", "Account Number", "IFSC Code", "Logged By"};
         for (int col = 0; col < headers.length; col++) {
             setCell(header, col, headers[col], styles.header);
         }
@@ -140,8 +142,9 @@ final class PayrollSheetWriter {
         setCell(row, 7, "", styles.grandTotalLabel);
         setCell(row, 8, "", styles.grandTotalLabel);
         setCell(row, 9, "", styles.grandTotalLabel);
+        setCell(row, 10, "", styles.grandTotalLabel);
         sheet.addMergedRegion(new CellRangeAddress(rowIndex, rowIndex, 0, 5));
-        sheet.addMergedRegion(new CellRangeAddress(rowIndex, rowIndex, 7, 9));
+        sheet.addMergedRegion(new CellRangeAddress(rowIndex, rowIndex, 7, 10));
     }
 
     private static void setCell(Row row, int col, String value, CellStyle style) {

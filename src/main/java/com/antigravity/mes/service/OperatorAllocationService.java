@@ -50,21 +50,33 @@ public class OperatorAllocationService {
     @Autowired
     private AttendanceAvailabilityService attendanceAvailabilityService;
 
-    public List<AllocationResponse> listForDate(LocalDate date) {
-        return allocationRepository.findByShiftDate(date).stream().map(this::toResponse).toList();
+    /** SUPER_ADMIN sees every factory's allocations; anyone else sees only their own -
+     * this was previously unfiltered. Filtered via each allocation's station's factory. */
+    public List<AllocationResponse> listForDate(LocalDate date, Long factoryId, boolean isSuperAdmin) {
+        return allocationRepository.findByShiftDate(date).stream()
+                .filter(a -> isSuperAdmin || factoryId == null || factoryId.equals(a.getStation().getFactoryId()))
+                .map(this::toResponse)
+                .toList();
     }
 
     /** Every OPERATOR who showed up on {@code date}, with their current allocation (if any) and
-     * whether a live tracking session is running for them right now - the Supervisor's daily board. */
-    public List<RosterEntryResponse> rosterForDate(LocalDate date) {
-        attendanceAvailabilityService.ensureSyncedForDate(date);
+     * whether a live tracking session is running for them right now - the Supervisor's daily
+     * board. SUPER_ADMIN sees every factory's roster; anyone else sees only their own - this
+     * was previously unfiltered (every factory's operators, mixed together). */
+    public List<RosterEntryResponse> rosterForDate(LocalDate date, Long factoryId, boolean isSuperAdmin) {
+        attendanceAvailabilityService.ensureSyncedForDate(factoryId, date);
 
         Map<Long, OperatorAllocation> allocationByEmployee = new HashMap<>();
         for (OperatorAllocation allocation : allocationRepository.findByShiftDate(date)) {
-            allocationByEmployee.put(allocation.getEmployee().getId(), allocation);
+            if (isSuperAdmin || factoryId == null || factoryId.equals(allocation.getStation().getFactoryId())) {
+                allocationByEmployee.put(allocation.getEmployee().getId(), allocation);
+            }
         }
 
-        return employeeRepository.findAll().stream()
+        List<Employee> employees = isSuperAdmin
+                ? employeeRepository.findAll()
+                : employeeRepository.findByFactoryId(factoryId);
+        return employees.stream()
                 .filter(Employee::isActive)
                 .filter(e -> e.hasActiveRoleNamed("OPERATOR"))
                 .filter(e -> attendanceRecordRepository.findByEmployeeIdAndWorkDate(e.getId(), date).isPresent())
@@ -93,13 +105,19 @@ public class OperatorAllocationService {
     /** Assigns (or re-assigns) one employee to one station for a shift/day. Replaces any existing
      * allocation for that employee on that shift/day - an operator can only be in one place at once. */
     @Transactional
-    public AllocationResponse assign(Long employeeId, Long stationId, LocalDate shiftDate, String shift) {
+    public AllocationResponse assign(Long employeeId, Long stationId, LocalDate shiftDate, String shift, Long factoryId, boolean isSuperAdmin) {
         String resolvedShift = (shift == null || shift.isBlank()) ? "GENERAL" : shift.trim();
 
         Employee employee = employeeRepository.findById(employeeId)
                 .orElseThrow(() -> new NotFoundException("Employee not found: " + employeeId));
+        if (!isSuperAdmin && factoryId != null && !factoryId.equals(employee.getFactoryId())) {
+            throw new NotFoundException("Employee not found: " + employeeId);
+        }
         Station station = stationRepository.findById(stationId)
                 .orElseThrow(() -> new NotFoundException("Station not found: " + stationId));
+        if (!isSuperAdmin && factoryId != null && !factoryId.equals(station.getFactoryId())) {
+            throw new NotFoundException("Station not found: " + stationId);
+        }
 
         OperatorAllocation allocation = allocationRepository
                 .findByEmployeeIdAndShiftDateAndShift(employeeId, shiftDate, resolvedShift)
@@ -118,8 +136,10 @@ public class OperatorAllocationService {
     }
 
     @Transactional
-    public void unassign(Long id) {
-        if (!allocationRepository.existsById(id)) {
+    public void unassign(Long id, Long factoryId, boolean isSuperAdmin) {
+        OperatorAllocation allocation = allocationRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Allocation not found: " + id));
+        if (!isSuperAdmin && factoryId != null && !factoryId.equals(allocation.getStation().getFactoryId())) {
             throw new NotFoundException("Allocation not found: " + id);
         }
         allocationRepository.deleteById(id);

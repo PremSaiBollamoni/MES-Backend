@@ -39,14 +39,22 @@ public class BundleTrackingService {
     @Autowired
     private StationRepository stationRepository;
 
-    public List<BundleResponse> listActive() {
+    /**
+     * SUPER_ADMIN sees every factory's active bundles; anyone else sees only their own -
+     * this was previously unfiltered. Filtered via each bundle's current station's
+     * factory (every IN_PROGRESS bundle always has one - only completeBundle() clears
+     * it, and completed bundles are never IN_PROGRESS so never reach this list).
+     */
+    public List<BundleResponse> listActive(Long factoryId, boolean isSuperAdmin) {
         return bundleRepository.findByStatusOrderByCreatedAtDesc(Bundle.Status.IN_PROGRESS).stream()
+                .filter(b -> isSuperAdmin || factoryId == null
+                        || (b.getCurrentStation() != null && factoryId.equals(b.getCurrentStation().getFactoryId())))
                 .map(this::toResponse)
                 .toList();
     }
 
     @Transactional
-    public BundleResponse createBundle(String bundleRef, int quantity, Long initialStationId, Long createdBy) {
+    public BundleResponse createBundle(String bundleRef, int quantity, Long initialStationId, Long createdBy, Long factoryId, boolean isSuperAdmin) {
         if (bundleRef == null || bundleRef.isBlank()) {
             throw new IllegalArgumentException("Bundle reference is required");
         }
@@ -56,8 +64,7 @@ public class BundleTrackingService {
         if (quantity <= 0) {
             throw new IllegalArgumentException("Quantity must be greater than zero");
         }
-        Station station = stationRepository.findById(initialStationId)
-                .orElseThrow(() -> new NotFoundException("Station not found: " + initialStationId));
+        Station station = requireStationInFactory(initialStationId, factoryId, isSuperAdmin);
 
         Bundle bundle = new Bundle();
         bundle.setBundleRef(bundleRef.trim());
@@ -72,10 +79,9 @@ public class BundleTrackingService {
     }
 
     @Transactional
-    public BundleResponse moveBundle(Long bundleId, Long toStationId, Long recordedBy) {
-        Bundle bundle = requireInProgressBundle(bundleId);
-        Station toStation = stationRepository.findById(toStationId)
-                .orElseThrow(() -> new NotFoundException("Station not found: " + toStationId));
+    public BundleResponse moveBundle(Long bundleId, Long toStationId, Long recordedBy, Long factoryId, boolean isSuperAdmin) {
+        Bundle bundle = requireInProgressBundleInFactory(bundleId, factoryId, isSuperAdmin);
+        Station toStation = requireStationInFactory(toStationId, factoryId, isSuperAdmin);
 
         if (bundle.getCurrentStation() != null) {
             logMovement(bundle, bundle.getCurrentStation(), BundleMovement.ScanType.OUT, recordedBy);
@@ -88,8 +94,8 @@ public class BundleTrackingService {
     }
 
     @Transactional
-    public BundleResponse completeBundle(Long bundleId, Long recordedBy) {
-        Bundle bundle = requireInProgressBundle(bundleId);
+    public BundleResponse completeBundle(Long bundleId, Long recordedBy, Long factoryId, boolean isSuperAdmin) {
+        Bundle bundle = requireInProgressBundleInFactory(bundleId, factoryId, isSuperAdmin);
         if (bundle.getCurrentStation() != null) {
             logMovement(bundle, bundle.getCurrentStation(), BundleMovement.ScanType.OUT, recordedBy);
         }
@@ -99,13 +105,16 @@ public class BundleTrackingService {
     }
 
     /** Current WIP count per active station, flagged when it exceeds the §8 threshold. */
-    public List<StationWipSummary> getWipSummary() {
+    public List<StationWipSummary> getWipSummary(Long factoryId, boolean isSuperAdmin) {
         List<Bundle> active = bundleRepository.findByStatusOrderByCreatedAtDesc(Bundle.Status.IN_PROGRESS);
         Map<Long, Long> countByStation = active.stream()
                 .filter(b -> b.getCurrentStation() != null)
                 .collect(Collectors.groupingBy(b -> b.getCurrentStation().getId(), Collectors.counting()));
 
-        return stationRepository.findAllByOrderByStationNumberAsc().stream()
+        List<Station> stations = isSuperAdmin
+                ? stationRepository.findAllByOrderByStationNumberAsc()
+                : stationRepository.findByFactoryIdOrderByStationNumberAsc(factoryId);
+        return stations.stream()
                 .filter(Station::isActive)
                 .map(station -> {
                     long count = countByStation.getOrDefault(station.getId(), 0L);
@@ -122,6 +131,29 @@ public class BundleTrackingService {
             throw new ConflictException("This bundle is already completed.");
         }
         return bundle;
+    }
+
+    /** Same lookup, but also enforces factory ownership via the bundle's current
+     * station - a non-super-admin caller gets "not found" for a bundle whose station
+     * belongs to a different factory, never a hint that it exists elsewhere. */
+    private Bundle requireInProgressBundleInFactory(Long bundleId, Long factoryId, boolean isSuperAdmin) {
+        Bundle bundle = requireInProgressBundle(bundleId);
+        if (!isSuperAdmin && factoryId != null
+                && (bundle.getCurrentStation() == null || !factoryId.equals(bundle.getCurrentStation().getFactoryId()))) {
+            throw new NotFoundException("Bundle not found: " + bundleId);
+        }
+        return bundle;
+    }
+
+    /** Same lookup, but also enforces factory ownership - a non-super-admin caller gets
+     * "not found" for a station in a different factory. */
+    private Station requireStationInFactory(Long stationId, Long factoryId, boolean isSuperAdmin) {
+        Station station = stationRepository.findById(stationId)
+                .orElseThrow(() -> new NotFoundException("Station not found: " + stationId));
+        if (!isSuperAdmin && factoryId != null && !factoryId.equals(station.getFactoryId())) {
+            throw new NotFoundException("Station not found: " + stationId);
+        }
+        return station;
     }
 
     private void logMovement(Bundle bundle, Station station, BundleMovement.ScanType scanType, Long recordedBy) {

@@ -23,7 +23,9 @@ public class ProfileController {
     @RequiresActivity("PROFILE")
     @GetMapping
     public ResponseEntity<EmployeeDetailResponse> get(@RequestAttribute("employeeId") Long employeeId) {
-        return ResponseEntity.ok(employeeManagementService.getEmployee(employeeId));
+        // Self-service: viewing your own record can never be a cross-factory access, so
+        // the factory ownership check is bypassed rather than threading it through here.
+        return ResponseEntity.ok(employeeManagementService.getEmployee(employeeId, null, true));
     }
 
     @RequiresActivity("PROFILE")

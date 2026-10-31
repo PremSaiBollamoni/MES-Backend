@@ -42,7 +42,7 @@ public class ReportDataAggregator {
     @Autowired private StockPositionService stockPositionService;
     @Autowired private BundleTrackingService bundleTrackingService;
 
-    public Map<String, Object> aggregateProduction(LocalDate date) {
+    public Map<String, Object> aggregateProduction(LocalDate date, Long factoryId, boolean isSuperAdmin) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("reportDate", date.toString());
         data.put("dataNotTracked", List.of(
@@ -51,11 +51,15 @@ public class ReportDataAggregator {
                 "Quality & Rework Statistics (not tracked in this system at all)"
         ));
 
-        List<ProductionEntry> entries = productionEntryRepository.findByShiftDate(date);
+        List<ProductionEntry> entries = productionEntryRepository.findByFactoryIdAndShiftDate(factoryId, date);
         List<AttendanceRecord> attendance = attendanceRecordRepository
-                .findByWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(date, date);
-        List<OperatorAllocation> allocations = operatorAllocationRepository.findByShiftDate(date);
-        List<Station> activeStations = stationRepository.findAllByOrderByStationNumberAsc().stream()
+                .findByFactoryIdAndWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(factoryId, date, date);
+        List<OperatorAllocation> allocations = operatorAllocationRepository.findByShiftDate(date).stream()
+                .filter(a -> factoryId == null || factoryId.equals(a.getStation().getFactoryId()))
+                .toList();
+        List<Station> activeStations = (isSuperAdmin
+                ? stationRepository.findAllByOrderByStationNumberAsc()
+                : stationRepository.findByFactoryIdOrderByStationNumberAsc(factoryId)).stream()
                 .filter(Station::isActive).toList();
 
         data.put("attendance", attendanceSection(attendance));
@@ -63,23 +67,23 @@ public class ReportDataAggregator {
         data.put("productionEntries", entryList(entries));
         data.put("stationWise", stationWise(entries, activeStations));
         data.put("employeePerformance", employeePerformance(entries));
-        data.put("stationManning", stationManning(date));
+        data.put("stationManning", stationManning(date, factoryId, isSuperAdmin));
         data.put("bottleneck", bottleneck(activeStations, entries));
         data.put("allocation", Map.of(
                 "presentOperators", attendance.size(),
                 "allocatedOperators", allocations.size(),
                 "unallocatedPresentOperators", Math.max(0, attendance.size() - allocations.size())
         ));
-        data.put("stockAvailability", stockAvailability(date));
-        data.put("dailyStockPosition", stockPosition(date));
-        data.put("wipSnapshot", wipSnapshot());
-        data.put("riskIndicators", riskIndicators(entries, attendance, date));
+        data.put("stockAvailability", stockAvailability(date, factoryId, isSuperAdmin));
+        data.put("dailyStockPosition", stockPosition(date, factoryId));
+        data.put("wipSnapshot", wipSnapshot(factoryId, isSuperAdmin));
+        data.put("riskIndicators", riskIndicators(entries, attendance, date, factoryId, isSuperAdmin));
         return data;
     }
 
     /** Station-wise stock: every station's current stock status (not just the shortages), plus
      * the zone-level daily stock position and the live WIP snapshot. */
-    public Map<String, Object> aggregateStock(LocalDate date) {
+    public Map<String, Object> aggregateStock(LocalDate date, Long factoryId, boolean isSuperAdmin) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("reportDate", date.toString());
         data.put("dataNotTracked", List.of(
@@ -87,20 +91,22 @@ public class ReportDataAggregator {
                 "Multi-day stock trend history (only the selected date's position is available)"
         ));
 
-        List<Station> activeStations = stationRepository.findAllByOrderByStationNumberAsc().stream()
+        List<Station> activeStations = (isSuperAdmin
+                ? stationRepository.findAllByOrderByStationNumberAsc()
+                : stationRepository.findByFactoryIdOrderByStationNumberAsc(factoryId)).stream()
                 .filter(Station::isActive).toList();
 
-        data.put("stationWiseStock", allStationStock(date, activeStations));
-        data.put("stockShortages", stockAvailability(date));
-        data.put("dailyStockPosition", stockPosition(date));
-        data.put("wipSnapshot", wipSnapshot());
-        data.put("riskIndicators", stockRiskIndicators(date));
+        data.put("stationWiseStock", allStationStock(date, activeStations, factoryId, isSuperAdmin));
+        data.put("stockShortages", stockAvailability(date, factoryId, isSuperAdmin));
+        data.put("dailyStockPosition", stockPosition(date, factoryId));
+        data.put("wipSnapshot", wipSnapshot(factoryId, isSuperAdmin));
+        data.put("riskIndicators", stockRiskIndicators(date, factoryId, isSuperAdmin));
         return data;
     }
 
     /** Full attendance register for the date: per-employee check-in/out and lateness, plus the
      * present-vs-allocated operator gap. */
-    public Map<String, Object> aggregateAttendance(LocalDate date) {
+    public Map<String, Object> aggregateAttendance(LocalDate date, Long factoryId, boolean isSuperAdmin) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("reportDate", date.toString());
         data.put("dataNotTracked", List.of(
@@ -109,9 +115,11 @@ public class ReportDataAggregator {
         ));
 
         List<AttendanceRecord> attendance = attendanceRecordRepository
-                .findByWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(date, date);
-        List<OperatorAllocation> allocations = operatorAllocationRepository.findByShiftDate(date);
-        List<ProductionEntry> entries = productionEntryRepository.findByShiftDate(date);
+                .findByFactoryIdAndWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(factoryId, date, date);
+        List<OperatorAllocation> allocations = operatorAllocationRepository.findByShiftDate(date).stream()
+                .filter(a -> factoryId == null || factoryId.equals(a.getStation().getFactoryId()))
+                .toList();
+        List<ProductionEntry> entries = productionEntryRepository.findByFactoryIdAndShiftDate(factoryId, date);
 
         data.put("attendanceSummary", attendanceSection(attendance));
         data.put("attendanceRegister", attendanceRegister(attendance));
@@ -120,8 +128,8 @@ public class ReportDataAggregator {
                 "allocatedOperators", allocations.size(),
                 "unallocatedPresentOperators", Math.max(0, attendance.size() - allocations.size())
         ));
-        data.put("stationManning", stationManning(date));
-        data.put("riskIndicators", riskIndicators(entries, attendance, date));
+        data.put("stationManning", stationManning(date, factoryId, isSuperAdmin));
+        data.put("riskIndicators", riskIndicators(entries, attendance, date, factoryId, isSuperAdmin));
         return data;
     }
 
@@ -129,7 +137,7 @@ public class ReportDataAggregator {
      * totals plus a day-by-day headcount trend, rather than the raw per-day register the daily
      * report uses (a full month of that would be thousands of rows and blow past what's useful
      * in a narrated report). */
-    public Map<String, Object> aggregateMonthlyAttendance(LocalDate monthStart, LocalDate monthEnd) {
+    public Map<String, Object> aggregateMonthlyAttendance(LocalDate monthStart, LocalDate monthEnd, Long factoryId) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("periodStart", monthStart.toString());
         data.put("periodEnd", monthEnd.toString());
@@ -139,7 +147,7 @@ public class ReportDataAggregator {
         ));
 
         List<AttendanceRecord> attendance = attendanceRecordRepository
-                .findByWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(monthStart, monthEnd);
+                .findByFactoryIdAndWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(factoryId, monthStart, monthEnd);
 
         long totalRecords = attendance.size();
         long totalLate = attendance.stream().filter(AttendanceRecord::isLate).count();
@@ -187,7 +195,7 @@ public class ReportDataAggregator {
     /** Monthly earnings rollup: who earned the most/least, and which operations/stations paid
      * out the least overall - built from the same per-entry wage formula as everywhere else in
      * the app (pieces * ratePerPiece / operatorCount), summed across the whole month. */
-    public Map<String, Object> aggregateEarnings(LocalDate monthStart, LocalDate monthEnd) {
+    public Map<String, Object> aggregateEarnings(LocalDate monthStart, LocalDate monthEnd, Long factoryId) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("periodStart", monthStart.toString());
         data.put("periodEnd", monthEnd.toString());
@@ -196,7 +204,7 @@ public class ReportDataAggregator {
                 "Multi-month earnings trend history (only the selected month's entries are available)"
         ));
 
-        List<ProductionEntry> entries = productionEntryRepository.findByShiftDateBetween(monthStart, monthEnd);
+        List<ProductionEntry> entries = productionEntryRepository.findByFactoryIdAndShiftDateBetween(factoryId, monthStart, monthEnd);
 
         Map<String, List<ProductionEntry>> byEmployee = entries.stream()
                 .collect(Collectors.groupingBy(e -> e.getEmployee().getName()));
@@ -256,7 +264,7 @@ public class ReportDataAggregator {
     }
 
     /** Full worker performance ranking (not just top/bottom 5), with attendance correlation. */
-    public Map<String, Object> aggregateWorkerPerformance(LocalDate date) {
+    public Map<String, Object> aggregateWorkerPerformance(LocalDate date, Long factoryId, boolean isSuperAdmin) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("reportDate", date.toString());
         data.put("dataNotTracked", List.of(
@@ -264,15 +272,15 @@ public class ReportDataAggregator {
                 "Multi-day performance trend history (only the selected date's entries are available)"
         ));
 
-        List<ProductionEntry> entries = productionEntryRepository.findByShiftDate(date);
+        List<ProductionEntry> entries = productionEntryRepository.findByFactoryIdAndShiftDate(factoryId, date);
         List<AttendanceRecord> attendance = attendanceRecordRepository
-                .findByWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(date, date);
+                .findByFactoryIdAndWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(factoryId, date, date);
 
         data.put("fullEmployeeRanking", fullEmployeeRanking(entries));
         data.put("employeePerformance", employeePerformance(entries));
         data.put("productionEntries", entryList(entries));
         data.put("attendanceSummary", attendanceSection(attendance));
-        data.put("riskIndicators", riskIndicators(entries, attendance, date));
+        data.put("riskIndicators", riskIndicators(entries, attendance, date, factoryId, isSuperAdmin));
         return data;
     }
 
@@ -396,8 +404,8 @@ public class ReportDataAggregator {
         }).toList();
     }
 
-    private List<Map<String, Object>> allStationStock(LocalDate date, List<Station> activeStations) {
-        Map<String, StockAvailabilityResponse> byStationNumber = stockAvailabilityService.listForDate(date).stream()
+    private List<Map<String, Object>> allStationStock(LocalDate date, List<Station> activeStations, Long factoryId, boolean isSuperAdmin) {
+        Map<String, StockAvailabilityResponse> byStationNumber = stockAvailabilityService.listForDate(date, factoryId, isSuperAdmin).stream()
                 .collect(Collectors.toMap(StockAvailabilityResponse::stationNumber, r -> r, (a, b) -> a));
         return activeStations.stream().map(station -> {
             StockAvailabilityResponse r = byStationNumber.get(station.getStationNumber());
@@ -412,20 +420,20 @@ public class ReportDataAggregator {
         }).toList();
     }
 
-    private List<String> stockRiskIndicators(LocalDate date) {
+    private List<String> stockRiskIndicators(LocalDate date, Long factoryId, boolean isSuperAdmin) {
         List<String> risks = new ArrayList<>();
-        long noStock = stockAvailabilityService.listForDate(date).stream().filter(r -> "NO_STOCK".equals(r.status())).count();
+        long noStock = stockAvailabilityService.listForDate(date, factoryId, isSuperAdmin).stream().filter(r -> "NO_STOCK".equals(r.status())).count();
         if (noStock > 0) risks.add(noStock + " station(s) have NO_STOCK today");
-        long lowStock = stockAvailabilityService.listForDate(date).stream().filter(r -> "LOW_STOCK".equals(r.status())).count();
+        long lowStock = stockAvailabilityService.listForDate(date, factoryId, isSuperAdmin).stream().filter(r -> "LOW_STOCK".equals(r.status())).count();
         if (lowStock > 0) risks.add(lowStock + " station(s) are at LOW_STOCK today");
-        List<StationWipSummary> wip = bundleTrackingService.getWipSummary();
+        List<StationWipSummary> wip = bundleTrackingService.getWipSummary(factoryId, isSuperAdmin);
         long alerting = wip.stream().filter(StationWipSummary::alertTriggered).count();
         if (alerting > 0) risks.add(alerting + " station(s) have a WIP bundle-count alert right now");
         return risks;
     }
 
-    private Map<String, Object> stationManning(LocalDate date) {
-        List<StationStatusResponse> statuses = stationStatusService.getStatusForDate(date);
+    private Map<String, Object> stationManning(LocalDate date, Long factoryId, boolean isSuperAdmin) {
+        List<StationStatusResponse> statuses = stationStatusService.getStatusForDate(date, factoryId, isSuperAdmin);
         Map<String, Long> counts = statuses.stream()
                 .collect(Collectors.groupingBy(StationStatusResponse::status, Collectors.counting()));
         List<String> unmannedCritical = statuses.stream()
@@ -451,8 +459,8 @@ public class ReportDataAggregator {
         return result;
     }
 
-    private List<Map<String, Object>> stockAvailability(LocalDate date) {
-        return stockAvailabilityService.listForDate(date).stream()
+    private List<Map<String, Object>> stockAvailability(LocalDate date, Long factoryId, boolean isSuperAdmin) {
+        return stockAvailabilityService.listForDate(date, factoryId, isSuperAdmin).stream()
                 .filter(r -> !"AVAILABLE".equals(r.status()))
                 .map(r -> {
                     Map<String, Object> m = new LinkedHashMap<>();
@@ -465,8 +473,8 @@ public class ReportDataAggregator {
                 }).toList();
     }
 
-    private List<Map<String, Object>> stockPosition(LocalDate date) {
-        return stockPositionService.listForDate(date).stream().map((StockPositionResponse r) -> {
+    private List<Map<String, Object>> stockPosition(LocalDate date, Long factoryId) {
+        return stockPositionService.listForDate(date, factoryId).stream().map((StockPositionResponse r) -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("zoneName", r.zoneName());
             m.put("openingBalance", r.openingBalance());
@@ -478,27 +486,27 @@ public class ReportDataAggregator {
         }).toList();
     }
 
-    private Map<String, Object> wipSnapshot() {
-        List<StationWipSummary> summary = bundleTrackingService.getWipSummary();
+    private Map<String, Object> wipSnapshot(Long factoryId, boolean isSuperAdmin) {
+        List<StationWipSummary> summary = bundleTrackingService.getWipSummary(factoryId, isSuperAdmin);
         List<Map<String, Object>> alerting = summary.stream()
                 .filter(StationWipSummary::alertTriggered)
                 .map(s -> Map.<String, Object>of("stationNumber", s.stationNumber(), "operationName", s.operationName(), "bundleCount", s.bundleCount()))
                 .toList();
         return Map.of(
                 "note", "This is the CURRENT live WIP state at report-generation time, not historical to the report date.",
-                "activeBundleCount", bundleTrackingService.listActive().size(),
+                "activeBundleCount", bundleTrackingService.listActive(factoryId, isSuperAdmin).size(),
                 "stationsWithWipAlert", alerting
         );
     }
 
-    private List<String> riskIndicators(List<ProductionEntry> entries, List<AttendanceRecord> attendance, LocalDate date) {
+    private List<String> riskIndicators(List<ProductionEntry> entries, List<AttendanceRecord> attendance, LocalDate date, Long factoryId, boolean isSuperAdmin) {
         List<String> risks = new ArrayList<>();
         long criticalCount = entries.stream().filter(e -> "CRITICAL".equals(classify(e))).count();
         if (criticalCount > 0) risks.add(criticalCount + " production entr" + (criticalCount == 1 ? "y is" : "ies are") + " at CRITICAL efficiency (<50%)");
-        long lowStockCount = stockAvailabilityService.listForDate(date).stream()
+        long lowStockCount = stockAvailabilityService.listForDate(date, factoryId, isSuperAdmin).stream()
                 .filter(r -> "NO_STOCK".equals(r.status()) || "LOW_STOCK".equals(r.status())).count();
         if (lowStockCount > 0) risks.add(lowStockCount + " station(s) flagged NO_STOCK or LOW_STOCK today");
-        List<StationStatusResponse> statuses = stationStatusService.getStatusForDate(date);
+        List<StationStatusResponse> statuses = stationStatusService.getStatusForDate(date, factoryId, isSuperAdmin);
         long criticalUnmanned = statuses.stream().filter(StationStatusResponse::critical).count();
         if (criticalUnmanned > 0) risks.add(criticalUnmanned + " bottleneck station(s) UNMANNED today");
         long unallocatedPresent = Math.max(0, attendance.size() - entries.stream().map(e -> e.getEmployee().getId()).distinct().count());

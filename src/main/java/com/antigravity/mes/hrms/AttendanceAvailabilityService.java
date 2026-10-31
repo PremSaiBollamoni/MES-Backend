@@ -36,7 +36,7 @@ public class AttendanceAvailabilityService {
         return t;
     });
 
-    private final Set<LocalDate> syncInFlight = ConcurrentHashMap.newKeySet();
+    private final Set<String> syncInFlight = ConcurrentHashMap.newKeySet();
 
     @Autowired
     private AttendanceRecordRepository attendanceRecordRepository;
@@ -47,20 +47,26 @@ public class AttendanceAvailabilityService {
     @Autowired
     private HrmsClient hrmsClient;
 
-    public void ensureSyncedForDate(LocalDate date) {
-        if (!hrmsClient.isEnabled() || attendanceRecordRepository.existsByWorkDate(date)) {
+    /** A null factoryId (e.g. a SUPER_ADMIN context with no single factory) is a safe
+     * no-op - there's no one factory's HRMS to proactively sync here. */
+    public void ensureSyncedForDate(Long factoryId, LocalDate date) {
+        if (factoryId == null || !hrmsClient.isEnabled(factoryId)
+                || attendanceRecordRepository.existsByFactoryIdAndWorkDate(factoryId, date)) {
             return;
         }
-        if (!syncInFlight.add(date)) {
-            return; // Already syncing this date on another request - don't pile up duplicates.
+        // Two factories needing the same date synced at the same time must not block each
+        // other - keyed by (factory, date), not date alone.
+        String key = factoryId + ":" + date;
+        if (!syncInFlight.add(key)) {
+            return; // Already syncing this factory+date on another request - don't pile up duplicates.
         }
         executor.submit(() -> {
             try {
-                attendanceSyncService.syncRange(date, date);
+                attendanceSyncService.syncRange(factoryId, date, date);
             } catch (Exception e) {
-                log.warn("Background attendance sync failed for {}: {}", date, e.getMessage());
+                log.warn("Background attendance sync failed for factory {} date {}: {}", factoryId, date, e.getMessage());
             } finally {
-                syncInFlight.remove(date);
+                syncInFlight.remove(key);
             }
         });
     }

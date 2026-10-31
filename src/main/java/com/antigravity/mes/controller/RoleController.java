@@ -29,12 +29,19 @@ public class RoleController {
     @Autowired
     private RoleManagementService roleManagementService;
 
-    /** Only active roles are offered - consumed by the employee create/edit form. */
+    /**
+     * Only active roles are offered - consumed by the employee create/edit form.
+     * Roles are global (shared by every factory, not duplicated per factory).
+     * SUPER_ADMIN is a system-wide role never assignable from a factory's own
+     * employee form, so it is excluded even for a SUPER_ADMIN caller here - creating
+     * another super admin is a deliberate, separate action, not a form dropdown pick.
+     */
     @RequiresActivity("EMPLOYEE_FORM")
     @GetMapping
     public ResponseEntity<List<RoleResponse>> list() {
         List<RoleResponse> roles = roleRepository.findAll().stream()
                 .filter(Role::isActive)
+                .filter(role -> !role.isSuperAdmin())
                 .map(role -> new RoleResponse(role.getRoleName()))
                 .toList();
         return ResponseEntity.ok(roles);

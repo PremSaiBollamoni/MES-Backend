@@ -27,8 +27,16 @@ public class RoleManagementService {
     @Autowired
     private EmployeeRepository employeeRepository;
 
+    /**
+     * Roles are global - every factory shares the same role catalogue and sees the
+     * same list here. SUPER_ADMIN is never shown, even to a super admin caller - it's
+     * a system role managed outside Role Management, not a row in this list.
+     */
     public List<RoleDetailResponse> listRoles() {
-        return roleRepository.findAll().stream().map(this::toDetail).toList();
+        return roleRepository.findAll().stream()
+                .filter(role -> !role.isSuperAdmin())
+                .map(this::toDetail)
+                .toList();
     }
 
     public RoleDetailResponse getRole(Long id) {
@@ -41,6 +49,9 @@ public class RoleManagementService {
             throw new IllegalArgumentException("Role name is required");
         }
         String roleName = request.roleName().trim().toUpperCase();
+        if ("SUPER_ADMIN".equals(roleName)) {
+            throw new ConflictException("SUPER_ADMIN is a reserved system role and cannot be created here");
+        }
         if (roleRepository.findByRoleName(roleName).isPresent()) {
             throw new ConflictException("Role name already exists: " + roleName);
         }
@@ -56,9 +67,15 @@ public class RoleManagementService {
     @Transactional
     public RoleDetailResponse updateRole(Long id, RoleUpdateRequest request) {
         Role role = requireRole(id);
+        if (role.isSuperAdmin()) {
+            throw new ConflictException("SUPER_ADMIN is a reserved system role and cannot be edited here");
+        }
 
         if (!isBlank(request.roleName())) {
             String roleName = request.roleName().trim().toUpperCase();
+            if ("SUPER_ADMIN".equals(roleName)) {
+                throw new ConflictException("SUPER_ADMIN is a reserved system role name");
+            }
             roleRepository.findByRoleName(roleName).ifPresent(existing -> {
                 if (!existing.getRoleId().equals(id)) {
                     throw new ConflictException("Role name already exists: " + roleName);
@@ -83,6 +100,9 @@ public class RoleManagementService {
     @Transactional
     public void deleteRole(Long id) {
         Role role = requireRole(id);
+        if (role.isSuperAdmin()) {
+            throw new ConflictException("SUPER_ADMIN is a reserved system role and cannot be deleted");
+        }
         long assignedCount = employeeRepository.findAll().stream()
                 .filter(e -> e.getRoles().stream().anyMatch(r -> r.getRoleId().equals(id)))
                 .count();

@@ -28,8 +28,13 @@ public class StockAvailabilityService {
     @Autowired
     private StockAvailabilityRepository stockAvailabilityRepository;
 
-    public List<StockAvailabilityResponse> listForDate(LocalDate date) {
-        List<Station> activeStations = stationRepository.findAllByOrderByStationNumberAsc().stream()
+    /** SUPER_ADMIN sees every factory's stock; anyone else sees only their own - this was
+     * previously unfiltered (findAllByOrderByStationNumberAsc across ALL factories). */
+    public List<StockAvailabilityResponse> listForDate(LocalDate date, Long factoryId, boolean isSuperAdmin) {
+        List<Station> allStations = isSuperAdmin
+                ? stationRepository.findAllByOrderByStationNumberAsc()
+                : stationRepository.findByFactoryIdOrderByStationNumberAsc(factoryId);
+        List<Station> activeStations = allStations.stream()
                 .filter(Station::isActive)
                 .toList();
 
@@ -54,12 +59,17 @@ public class StockAvailabilityService {
     }
 
     @Transactional
-    public StockAvailabilityResponse logStock(Long stationId, LocalDate shiftDate, int currentStockQty, String reason, Long loggedByEmployeeId) {
+    public StockAvailabilityResponse logStock(
+            Long stationId, LocalDate shiftDate, int currentStockQty, String reason, Long loggedByEmployeeId,
+            Long factoryId, boolean isSuperAdmin) {
         if (currentStockQty < 0) {
             throw new IllegalArgumentException("Current stock quantity cannot be negative");
         }
         Station station = stationRepository.findById(stationId)
                 .orElseThrow(() -> new IllegalArgumentException("Station not found: " + stationId));
+        if (!isSuperAdmin && factoryId != null && !factoryId.equals(station.getFactoryId())) {
+            throw new IllegalArgumentException("Station not found: " + stationId);
+        }
 
         String status = deriveStatus(station, currentStockQty);
 

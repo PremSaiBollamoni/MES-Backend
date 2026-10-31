@@ -40,25 +40,29 @@ public class JwtService {
         this.expirationMinutes = expirationMinutes;
     }
 
-    public String issueToken(Long employeeId, String role) {
+    public String issueToken(Long employeeId, String role, Long factoryId, boolean isSuperAdmin) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + expirationMinutes * 60_000);
         return Jwts.builder()
                 .subject(String.valueOf(employeeId))
                 .claim("role", role)
+                .claim("factory_id", factoryId)
+                .claim("is_super_admin", isSuperAdmin)
                 .issuedAt(now)
                 .expiration(expiry)
                 .signWith(signingKey)
                 .compact();
     }
 
-    /** Returns the token's principal (employee id + role) if valid (signature + not expired), else empty. */
+    /** Returns the token's principal (employee id + role + factory + super admin flag) if valid (signature + not expired), else empty. */
     public Optional<TokenPrincipal> validate(String token) {
         try {
             Claims claims = parseClaims(token);
             Long employeeId = Long.valueOf(claims.getSubject());
             String role = claims.get("role", String.class);
-            return Optional.of(new TokenPrincipal(employeeId, role));
+            Long factoryId = claims.get("factory_id", Long.class);
+            Boolean isSuperAdmin = claims.get("is_super_admin", Boolean.class);
+            return Optional.of(new TokenPrincipal(employeeId, role, factoryId, isSuperAdmin != null && isSuperAdmin));
         } catch (JwtException | IllegalArgumentException e) {
             return Optional.empty();
         }

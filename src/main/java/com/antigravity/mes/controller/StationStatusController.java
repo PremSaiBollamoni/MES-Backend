@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,7 +25,10 @@ public class StationStatusController {
 
     @RequiresActivity("OPERATIONS")
     @GetMapping
-    public ResponseEntity<List<StationStatusResponse>> getStatus(@RequestParam String date) {
-        return ResponseEntity.ok(stationStatusService.getStatusForDate(LocalDate.parse(date)));
+    public ResponseEntity<List<StationStatusResponse>> getStatus(
+            @RequestParam String date,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(stationStatusService.getStatusForDate(LocalDate.parse(date), factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 }

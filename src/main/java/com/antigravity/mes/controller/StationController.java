@@ -25,38 +25,55 @@ public class StationController {
 
     @RequiresActivity("STATION_LIST")
     @GetMapping
-    public ResponseEntity<List<StationResponse>> list() {
-        return ResponseEntity.ok(stationManagementService.listStations());
+    public ResponseEntity<List<StationResponse>> list(
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(stationManagementService.listStations(factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 
     @RequiresActivity("STATION_LIST")
     @GetMapping("/{id}")
-    public ResponseEntity<StationResponse> get(@PathVariable Long id) {
-        return ResponseEntity.ok(stationManagementService.getStation(id));
+    public ResponseEntity<StationResponse> get(
+            @PathVariable Long id,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(stationManagementService.getStation(id, factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 
     @RequiresActivity("STATION_FORM")
     @PostMapping
-    public ResponseEntity<StationResponse> create(@RequestBody StationCreateRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(stationManagementService.createStation(request));
+    public ResponseEntity<StationResponse> create(
+            @RequestBody StationCreateRequest request,
+            @RequestAttribute(required = false) Long factoryId) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(stationManagementService.createStation(request, factoryId));
     }
 
     @RequiresActivity("STATION_FORM")
     @PutMapping("/{id}")
-    public ResponseEntity<StationResponse> update(@PathVariable Long id, @RequestBody StationUpdateRequest request) {
-        return ResponseEntity.ok(stationManagementService.updateStation(id, request));
+    public ResponseEntity<StationResponse> update(
+            @PathVariable Long id,
+            @RequestBody StationUpdateRequest request,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(stationManagementService.updateStation(id, request, factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 
     @RequiresActivity("STATION_FORM")
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        stationManagementService.deleteStation(id);
+    public ResponseEntity<Void> delete(
+            @PathVariable Long id,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        stationManagementService.deleteStation(id, factoryId, Boolean.TRUE.equals(isSuperAdmin));
         return ResponseEntity.noContent().build();
     }
 
     @RequiresActivity("STATION_FORM")
     @PostMapping("/bulk-delete")
-    public ResponseEntity<BulkDeleteResult> bulkDelete(@RequestBody BulkDeleteRequest request) {
-        return ResponseEntity.ok(stationManagementService.deleteStations(request.ids()));
+    public ResponseEntity<BulkDeleteResult> bulkDelete(
+            @RequestBody BulkDeleteRequest request,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(stationManagementService.deleteStations(request.ids(), factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 }

@@ -14,4 +14,7 @@ public interface ProductionEntryRepository extends JpaRepository<ProductionEntry
     List<ProductionEntry> findByEmployeeIdAndShiftDateBetweenOrderByShiftDateDesc(Long employeeId, LocalDate from, LocalDate to);
 
     List<ProductionEntry> findByEmployeeIdAndShiftDate(Long employeeId, LocalDate shiftDate);
+
+    List<ProductionEntry> findByFactoryIdAndShiftDate(Long factoryId, LocalDate shiftDate);
+    List<ProductionEntry> findByFactoryIdAndShiftDateBetween(Long factoryId, LocalDate from, LocalDate to);
 }

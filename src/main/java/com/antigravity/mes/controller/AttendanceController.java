@@ -38,12 +38,12 @@ public class AttendanceController {
 
     @RequiresActivity("ATTENDANCE")
     @GetMapping("/live")
-    public ResponseEntity<?> live() {
-        if (!hrmsClient.isEnabled()) {
+    public ResponseEntity<?> live(@RequestAttribute(required = false) Long factoryId) {
+        if (!hrmsClient.isEnabled(factoryId)) {
             return unavailable();
         }
         try {
-            return ResponseEntity.ok(hrmsClient.getLiveStatus());
+            return ResponseEntity.ok(hrmsClient.getLiveStatus(factoryId));
         } catch (ResourceAccessException e) {
             return unreachable();
         } catch (HttpClientErrorException.Unauthorized e) {
@@ -53,13 +53,15 @@ public class AttendanceController {
 
     @RequiresActivity("ATTENDANCE")
     @GetMapping("/daily")
-    public ResponseEntity<?> daily(@RequestParam(required = false) String date) {
-        if (!hrmsClient.isEnabled()) {
+    public ResponseEntity<?> daily(
+            @RequestParam(required = false) String date,
+            @RequestAttribute(required = false) Long factoryId) {
+        if (!hrmsClient.isEnabled(factoryId)) {
             return unavailable();
         }
         try {
             LocalDate parsed = date != null ? LocalDate.parse(date) : null;
-            return ResponseEntity.ok(hrmsClient.getDailyAttendance(parsed));
+            return ResponseEntity.ok(hrmsClient.getDailyAttendance(factoryId, parsed));
         } catch (ResourceAccessException e) {
             return unreachable();
         } catch (HttpClientErrorException.Unauthorized e) {
@@ -70,15 +72,17 @@ public class AttendanceController {
     /** Pulls every day in the window from HRMS and upserts it into our local history. Safe to call repeatedly - re-syncs just overwrite the same rows. */
     @RequiresActivity("ATTENDANCE")
     @PostMapping("/sync")
-    public ResponseEntity<?> sync(@RequestParam(required = false) Integer days) {
-        if (!hrmsClient.isEnabled()) {
+    public ResponseEntity<?> sync(
+            @RequestParam(required = false) Integer days,
+            @RequestAttribute(required = false) Long factoryId) {
+        if (!hrmsClient.isEnabled(factoryId)) {
             return unavailable();
         }
         try {
             int window = days == null ? DEFAULT_SYNC_DAYS : Math.min(Math.max(days, 1), MAX_SYNC_DAYS);
             LocalDate to = LocalDate.now();
             LocalDate from = to.minusDays(window - 1L);
-            AttendanceSyncResult result = attendanceSyncService.syncRange(from, to);
+            AttendanceSyncResult result = attendanceSyncService.syncRange(factoryId, from, to);
             return ResponseEntity.ok(result);
         } catch (ResourceAccessException e) {
             return unreachable();
@@ -91,6 +95,8 @@ public class AttendanceController {
      * Local attendance history (independent of HRMS's own retention window).
      * Supply an explicit {@code from}/{@code to} ISO date range (used by the Monthly view),
      * or a rolling {@code days} window, or an {@code employeeId} for one person's full history.
+     * SUPER_ADMIN sees every factory's history; anyone else sees only their own - this was
+     * previously unfiltered, and the employeeId path had no ownership check at all.
      */
     @RequiresActivity("ATTENDANCE")
     @GetMapping("/history")
@@ -98,19 +104,30 @@ public class AttendanceController {
             @RequestParam(required = false) Integer days,
             @RequestParam(required = false) Long employeeId,
             @RequestParam(required = false) String from,
-            @RequestParam(required = false) String to) {
+            @RequestParam(required = false) String to,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        boolean superAdmin = Boolean.TRUE.equals(isSuperAdmin);
         if (employeeId != null) {
-            return ResponseEntity.ok(attendanceRecordRepository.findByEmployeeIdOrderByWorkDateDesc(employeeId));
+            List<AttendanceRecord> records = attendanceRecordRepository.findByEmployeeIdOrderByWorkDateDesc(employeeId);
+            if (!superAdmin && factoryId != null) {
+                records = records.stream().filter(r -> factoryId.equals(r.getFactoryId())).toList();
+            }
+            return ResponseEntity.ok(records);
         }
         if (from != null && to != null) {
-            return ResponseEntity.ok(
-                    attendanceRecordRepository.findByWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(
-                            LocalDate.parse(from), LocalDate.parse(to)));
+            List<AttendanceRecord> records = superAdmin
+                    ? attendanceRecordRepository.findByWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(LocalDate.parse(from), LocalDate.parse(to))
+                    : attendanceRecordRepository.findByFactoryIdAndWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(factoryId, LocalDate.parse(from), LocalDate.parse(to));
+            return ResponseEntity.ok(records);
         }
         int window = days == null ? 30 : Math.min(Math.max(days, 1), MAX_SYNC_DAYS);
         LocalDate rangeTo = LocalDate.now();
         LocalDate rangeFrom = rangeTo.minusDays(window - 1L);
-        return ResponseEntity.ok(attendanceRecordRepository.findByWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(rangeFrom, rangeTo));
+        List<AttendanceRecord> records = superAdmin
+                ? attendanceRecordRepository.findByWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(rangeFrom, rangeTo)
+                : attendanceRecordRepository.findByFactoryIdAndWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(factoryId, rangeFrom, rangeTo);
+        return ResponseEntity.ok(records);
     }
 
     private ResponseEntity<Map<String, String>> unavailable() {

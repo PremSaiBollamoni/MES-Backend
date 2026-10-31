@@ -21,6 +21,7 @@ public final class ErrorCodes {
 
     // Production entry
     public static final String PIECES_NEGATIVE = "ERR_PIECES_NEGATIVE";
+    public static final String COLOUR_REQUIRED = "ERR_COLOUR_REQUIRED";
     public static final String TIME_NOT_POSITIVE = "ERR_TIME_NOT_POSITIVE";
     public static final String TIME_REQUIRED = "ERR_TIME_REQUIRED";
     public static final String END_BEFORE_START = "ERR_END_BEFORE_START";
@@ -52,6 +53,7 @@ public final class ErrorCodes {
             case NO_ACCESS -> "You do not have access to this feature";
             case SESSION_INVALID -> "Invalid or expired session - please log in again";
             case PIECES_NEGATIVE -> "Pieces produced cannot be negative";
+            case COLOUR_REQUIRED -> "Colour is required";
             case TIME_NOT_POSITIVE -> "Time on machine must be greater than zero";
             case TIME_REQUIRED -> "A time range or duration is required";
             case END_BEFORE_START -> "End time must be after start time";

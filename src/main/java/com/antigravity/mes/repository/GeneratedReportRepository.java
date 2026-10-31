@@ -12,6 +12,6 @@ import java.util.Optional;
 
 @Repository
 public interface GeneratedReportRepository extends JpaRepository<GeneratedReport, Long> {
-    Optional<GeneratedReport> findByReportDateAndReportTypeAndPeriodType(LocalDate reportDate, ReportType reportType, PeriodType periodType);
-    List<GeneratedReport> findAllByReportTypeOrderByReportDateDesc(ReportType reportType);
+    Optional<GeneratedReport> findByFactoryIdAndReportDateAndReportTypeAndPeriodType(Long factoryId, LocalDate reportDate, ReportType reportType, PeriodType periodType);
+    List<GeneratedReport> findAllByFactoryIdAndReportTypeOrderByReportDateDesc(Long factoryId, ReportType reportType);
 }

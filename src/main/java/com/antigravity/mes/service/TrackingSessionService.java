@@ -53,14 +53,20 @@ public class TrackingSessionService {
     @Autowired
     private BundleRepository bundleRepository;
 
-    public List<TrackingSessionResponse> listForDate(LocalDate date) {
+    /** SUPER_ADMIN sees every factory's tracking sessions; anyone else sees only their
+     * own - this was previously unfiltered. Filtered via each session's station's
+     * factory (every session always has one). */
+    public List<TrackingSessionResponse> listForDate(LocalDate date, Long factoryId, boolean isSuperAdmin) {
         return trackingSessionRepository.findByShiftDateOrderByStartedAtDesc(date).stream()
+                .filter(s -> isSuperAdmin || factoryId == null || factoryId.equals(s.getStation().getFactoryId()))
                 .map(this::toResponse)
                 .toList();
     }
 
     @Transactional
-    public TrackingSessionResponse start(List<Long> employeeIds, Long stationId, LocalDate shiftDate, int piecesIssued, Long startedBy) {
+    public TrackingSessionResponse start(
+            List<Long> employeeIds, Long stationId, LocalDate shiftDate, int piecesIssued, Long startedBy,
+            Long factoryId, boolean isSuperAdmin) {
         if (piecesIssued <= 0) {
             throw new IllegalArgumentException("Pieces issued must be greater than zero");
         }
@@ -74,6 +80,9 @@ public class TrackingSessionService {
 
         Station station = stationRepository.findById(stationId)
                 .orElseThrow(() -> new NotFoundException("Station not found: " + stationId));
+        if (!isSuperAdmin && factoryId != null && !factoryId.equals(station.getFactoryId())) {
+            throw new NotFoundException("Station not found: " + stationId);
+        }
 
         if (distinctIds.size() != station.getOperatorCount()) {
             throw new ConflictException(
@@ -103,8 +112,11 @@ public class TrackingSessionService {
 
         // Auto-create the WIP bundle for these issued pieces (PALMS §8/§10 linkage) - the bundle
         // ref is derived from the session id so it's always unique and traceable back here.
+        // Internal call, not an external caller's request - the station (and therefore
+        // factory) was already resolved and validated above, so ownership is bypassed
+        // (isSuperAdmin=true) rather than re-checked against a caller-supplied factoryId.
         BundleResponse bundleResponse = bundleTrackingService.createBundle(
-                "TRK-" + session.getId(), piecesIssued, stationId, startedBy);
+                "TRK-" + session.getId(), piecesIssued, stationId, startedBy, station.getFactoryId(), true);
         Bundle bundle = bundleRepository.findById(bundleResponse.id())
                 .orElseThrow(() -> new NotFoundException("Bundle not found: " + bundleResponse.id()));
         session.setBundle(bundle);
@@ -116,9 +128,12 @@ public class TrackingSessionService {
      * and the pieces actually completed (defaults to the pieces originally issued if not overridden) -
      * each entry carries the full team output, with wages split per-operator at read time. */
     @Transactional
-    public TrackingSessionResponse stop(Long sessionId, Integer piecesCompleted, Long stoppedBy) {
+    public TrackingSessionResponse stop(Long sessionId, Integer piecesCompleted, Long stoppedBy, Long factoryId, boolean isSuperAdmin) {
         TrackingSession session = trackingSessionRepository.findById(sessionId)
                 .orElseThrow(() -> new NotFoundException("Tracking session not found: " + sessionId));
+        if (!isSuperAdmin && factoryId != null && !factoryId.equals(session.getStation().getFactoryId())) {
+            throw new NotFoundException("Tracking session not found: " + sessionId);
+        }
         if (session.getStatus() != TrackingSession.Status.ACTIVE) {
             throw new ConflictException("This tracking session has already been stopped.");
         }
@@ -150,7 +165,8 @@ public class TrackingSessionService {
         }
 
         if (session.getBundle() != null) {
-            bundleTrackingService.completeBundle(session.getBundle().getId(), stoppedBy);
+            // Same rationale as start() above - internal call, ownership already established.
+            bundleTrackingService.completeBundle(session.getBundle().getId(), stoppedBy, session.getStation().getFactoryId(), true);
         }
 
         return toResponse(session);

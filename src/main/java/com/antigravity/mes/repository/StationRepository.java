@@ -10,5 +10,8 @@ import java.util.Optional;
 @Repository
 public interface StationRepository extends JpaRepository<Station, Long> {
     Optional<Station> findByStationNumber(String stationNumber);
+    Optional<Station> findByFactoryIdAndStationNumber(Long factoryId, String stationNumber);
     List<Station> findAllByOrderByStationNumberAsc();
+    List<Station> findByFactoryIdOrderByStationNumberAsc(Long factoryId);
+    long countByFactoryId(Long factoryId);
 }

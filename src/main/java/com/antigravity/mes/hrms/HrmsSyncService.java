@@ -32,21 +32,23 @@ public class HrmsSyncService {
     @Autowired
     private EmployeeInfoRepository employeeInfoRepository;
 
-    public boolean isEnabled() {
-        return hrmsClient.isEnabled();
+    public boolean isEnabled(Long factoryId) {
+        return hrmsClient.isEnabled(factoryId);
     }
 
     /**
      * Best-effort: HRMS being unreachable must never fail or roll back the local
      * employee creation, so every failure is caught and logged, never rethrown.
      * Returns the created HRMS record, or null if sync didn't happen/failed.
+     * Uses whichever HRMS connection resolves for the employee's own factory.
      */
     public HrmsEmployeeOut syncNewEmployee(Employee employee, EmployeeInfo info) {
-        if (!hrmsClient.isEnabled()) {
+        Long factoryId = employee.getFactoryId();
+        if (!hrmsClient.isEnabled(factoryId)) {
             return null;
         }
         try {
-            int nextDeviceUserId = nextDeviceUserId();
+            int nextDeviceUserId = nextDeviceUserId(factoryId);
             String deviceUserId = String.valueOf(nextDeviceUserId);
             String hrmsEmployeeCode = String.format("GTG%03d", nextDeviceUserId);
 
@@ -61,7 +63,7 @@ public class HrmsSyncService {
                     info.getDesignation(),
                     "biometric",
                     null);
-            HrmsEmployeeOut created = hrmsClient.createEmployee(request);
+            HrmsEmployeeOut created = hrmsClient.createEmployee(factoryId, request);
             log.info("Synced new employee {} to HRMS as {} (device_user_id={}) - "
                             + "enroll this ID on the physical biometric device for attendance to work",
                     employee.getUsername(), hrmsEmployeeCode, deviceUserId);
@@ -72,30 +74,30 @@ public class HrmsSyncService {
         }
     }
 
-    /** HRMS employees with no locally-linked employee_info row yet. */
-    public List<HrmsEmployeeOut> listUnlinkedEmployees() {
-        Set<String> linkedCodes = employeeInfoRepository.findAll().stream()
+    /** HRMS employees with no locally-linked employee_info row yet, from this factory's own HRMS. */
+    public List<HrmsEmployeeOut> listUnlinkedEmployees(Long factoryId) {
+        Set<String> linkedCodes = employeeInfoRepository.findByFactoryId(factoryId).stream()
                 .map(EmployeeInfo::getHrmsEmployeeCode)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
-        return hrmsClient.listEmployees(true).stream()
+        return hrmsClient.listEmployees(factoryId, true).stream()
                 .filter(e -> !linkedCodes.contains(e.employeeCode()))
                 .toList();
     }
 
     /** Not best-effort - this is a direct user action, so failures must surface. */
-    public void enrollFace(int hrmsEmployeeId, byte[] fileBytes, String filename) {
-        hrmsClient.enrollFace(hrmsEmployeeId, fileBytes, filename);
+    public void enrollFace(Long factoryId, int hrmsEmployeeId, byte[] fileBytes, String filename) {
+        hrmsClient.enrollFace(factoryId, hrmsEmployeeId, fileBytes, filename);
     }
 
     /**
      * HRMS assigns device_user_id as a plain auto-incrementing integer (matching the
      * physical device's own enrollment slot numbering) - their employee_code convention
      * ("GTG023", "GTG101", ...) is literally that number zero-padded. We mirror both by
-     * taking the current max device_user_id in HRMS and adding one.
+     * taking the current max device_user_id in this factory's own HRMS and adding one.
      */
-    private int nextDeviceUserId() {
-        return hrmsClient.listEmployees(false).stream()
+    private int nextDeviceUserId(Long factoryId) {
+        return hrmsClient.listEmployees(factoryId, false).stream()
                 .map(HrmsEmployeeOut::deviceUserId)
                 .filter(id -> id != null && id.matches("\\d+"))
                 .mapToInt(Integer::parseInt)

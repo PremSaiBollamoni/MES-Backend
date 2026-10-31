@@ -20,6 +20,9 @@ public class GeneratedReport {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "factory_id", nullable = false)
+    private Long factoryId;
+
     @Column(name = "report_date", nullable = false)
     private LocalDate reportDate;
 
@@ -31,7 +34,7 @@ public class GeneratedReport {
     @Column(name = "period_type", nullable = false, length = 10)
     private PeriodType periodType = PeriodType.DAILY;
 
-    @Column(name = "generated_by_employee_id", nullable = false)
+    @Column(name = "generated_by_employee_id")
     private Long generatedByEmployeeId;
 
     @Lob
@@ -46,6 +49,9 @@ public class GeneratedReport {
     private LocalDateTime createdAt;
 
     public Long getId() { return id; }
+
+    public Long getFactoryId() { return factoryId; }
+    public void setFactoryId(Long factoryId) { this.factoryId = factoryId; }
 
     public LocalDate getReportDate() { return reportDate; }
     public void setReportDate(LocalDate reportDate) { this.reportDate = reportDate; }

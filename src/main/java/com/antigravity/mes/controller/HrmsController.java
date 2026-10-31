@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -28,27 +29,27 @@ public class HrmsController {
 
     @RequiresActivity("EMPLOYEE_LIST")
     @GetMapping("/status")
-    public ResponseEntity<Map<String, Object>> status() {
-        return ResponseEntity.ok(Map.of("enabled", hrmsClient.isEnabled()));
+    public ResponseEntity<Map<String, Object>> status(@RequestAttribute(required = false) Long factoryId) {
+        return ResponseEntity.ok(Map.of("enabled", hrmsClient.isEnabled(factoryId)));
     }
 
     @RequiresActivity("EMPLOYEE_LIST")
     @GetMapping("/employees")
-    public ResponseEntity<?> employees() {
-        if (!hrmsClient.isEnabled()) {
+    public ResponseEntity<?> employees(@RequestAttribute(required = false) Long factoryId) {
+        if (!hrmsClient.isEnabled(factoryId)) {
             return unavailable();
         }
-        return ResponseEntity.ok(hrmsClient.listEmployees(true));
+        return ResponseEntity.ok(hrmsClient.listEmployees(factoryId, true));
     }
 
     /** HRMS employees created directly in the HRMS portal that have no local counterpart yet. */
     @RequiresActivity("EMPLOYEE_LIST")
     @GetMapping("/employees/unlinked")
-    public ResponseEntity<?> unlinkedEmployees() {
-        if (!hrmsClient.isEnabled()) {
+    public ResponseEntity<?> unlinkedEmployees(@RequestAttribute(required = false) Long factoryId) {
+        if (!hrmsClient.isEnabled(factoryId)) {
             return unavailable();
         }
-        return ResponseEntity.ok(hrmsSyncService.listUnlinkedEmployees());
+        return ResponseEntity.ok(hrmsSyncService.listUnlinkedEmployees(factoryId));
     }
 
     private ResponseEntity<Map<String, String>> unavailable() {

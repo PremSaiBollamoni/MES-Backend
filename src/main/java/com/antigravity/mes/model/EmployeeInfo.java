@@ -20,11 +20,14 @@ public class EmployeeInfo {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "factory_id", nullable = false)
+    private Long factoryId;
+
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "employee_id", nullable = false, unique = true)
     private Employee employee;
 
-    @Column(name = "employee_code", length = 30, nullable = false, unique = true)
+    @Column(name = "employee_code", length = 30, nullable = false)
     private String employeeCode;
 
     @Column(name = "hrms_employee_id")
@@ -101,6 +104,14 @@ public class EmployeeInfo {
 
     public Long getId() {
         return id;
+    }
+
+    public Long getFactoryId() {
+        return factoryId;
+    }
+
+    public void setFactoryId(Long factoryId) {
+        this.factoryId = factoryId;
     }
 
     public Employee getEmployee() {

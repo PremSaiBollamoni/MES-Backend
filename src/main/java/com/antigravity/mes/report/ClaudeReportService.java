@@ -1,163 +1,48 @@
 package com.antigravity.mes.report;
 
-import com.anthropic.client.AnthropicClient;
-import com.anthropic.client.okhttp.AnthropicOkHttpClient;
-import com.anthropic.core.http.StreamResponse;
-import com.anthropic.models.messages.Model;
-import com.anthropic.models.messages.RawMessageStreamEvent;
-import com.anthropic.models.messages.MessageCreateParams;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.antigravity.mes.ai.AiFeature;
+import com.antigravity.mes.ai.AiService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Turns the real, aggregated production data for one day into a full narrative report by
- * calling an LLM. Claude (Haiku 4.5) is the default provider; OpenRouter is a switchable
- * alternative for testing other/free models (e.g. nvidia/nemotron-3-ultra-550b-a55b:free) without
- * touching the Claude path at all - selected via app.reports.provider (CLAUDE or OPENROUTER).
- * Either way, the model only ever sees the pre-computed metrics JSON - it is instructed to
- * narrate and analyze that data, never invent numbers, and to skip any section PALMS doesn't
- * actually track rather than fabricate one.
+ * calling an LLM. The model is whichever one the REPORT feature is set to in the AI settings,
+ * so any configured provider works. Either way, the model only ever sees the pre-computed
+ * metrics JSON - it is instructed to narrate and analyze that data, never invent numbers, and
+ * to skip any section PALMS doesn't actually track rather than fabricate one.
  */
 @Service
 public class ClaudeReportService {
 
-    private static final String MODEL_NAME = "claude-haiku-4-5-20251001";
-    private static final Model MODEL = Model.CLAUDE_HAIKU_4_5_20251001;
+    private static final int MAX_TOKENS = 4000;
 
-    private static final String OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-
-    @Value("${app.reports.provider:CLAUDE}")
-    private String provider;
-
-    @Value("${app.anthropic.enabled}")
-    private boolean enabled;
-
-    @Value("${app.anthropic.api-key}")
-    private String apiKey;
-
-    @Value("${app.openrouter.enabled:false}")
-    private boolean openRouterEnabled;
-
-    @Value("${app.openrouter.api-key:}")
-    private String openRouterApiKey;
-
-    @Value("${app.openrouter.model:nvidia/nemotron-3-ultra-550b-a55b:free}")
-    private String openRouterModel;
+    @Autowired
+    private AiService aiService;
 
     @Autowired
     private ObjectMapper objectMapper;
 
-    /** True if the caller's own choice (from the report generation screen) or, absent that,
-     * the server-configured default, resolves to OpenRouter rather than Claude. */
-    private boolean usingOpenRouter(String providerOverride) {
-        String effective = (providerOverride == null || providerOverride.isBlank()) ? provider : providerOverride;
-        return "OPENROUTER".equalsIgnoreCase(effective);
+    public boolean isEnabled() {
+        return aiService.isConfigured(AiFeature.REPORT);
     }
 
-    /** The OpenRouter model to call: the caller's own choice if given, otherwise the
-     * server-configured default - lets a report be regenerated against a replacement model
-     * immediately (e.g. the configured one is deprecated/down) with no redeploy. */
-    private String resolveOpenRouterModel(String modelOverride) {
-        return (modelOverride == null || modelOverride.isBlank()) ? openRouterModel : modelOverride;
-    }
-
-    public boolean isEnabled(String providerOverride) {
-        if (usingOpenRouter(providerOverride)) {
-            return openRouterEnabled && openRouterApiKey != null && !openRouterApiKey.isBlank();
-        }
-        return enabled && apiKey != null && !apiKey.isBlank();
-    }
-
-    public String getModelUsed(String providerOverride, String modelOverride) {
-        return usingOpenRouter(providerOverride) ? resolveOpenRouterModel(modelOverride) : MODEL_NAME;
-    }
-
-    public String generateHtmlReport(
-            ReportType reportType, PeriodType periodType, String periodLabel, Map<String, Object> metrics,
-            String providerOverride, String modelOverride) throws Exception {
-        if (!isEnabled(providerOverride)) {
-            throw new IllegalStateException(usingOpenRouter(providerOverride)
-                    ? "AI reports are disabled - set OPENROUTER_API_KEY to enable them"
-                    : "AI reports are disabled - set ANTHROPIC_API_KEY to enable them");
-        }
-
+    /** Returns the cleaned HTML and the model that wrote it - the fallback model when the main one was unavailable. */
+    public AiService.AiReply generateHtmlReport(
+            ReportType reportType, PeriodType periodType, String periodLabel, Map<String, Object> metrics) throws Exception {
         String metricsJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(metrics);
         String dataDescription = periodType == PeriodType.MONTHLY
                 ? "Here is this month's real, pre-computed data. Generate the full report from it:\n\n"
                 : "Here is today's real, pre-computed data. Generate the full report from it:\n\n";
         String system = systemPrompt(reportType, periodType, periodLabel);
 
-        String html = usingOpenRouter(providerOverride)
-                ? generateViaOpenRouter(resolveOpenRouterModel(modelOverride), system, dataDescription + metricsJson)
-                : generateViaClaude(system, dataDescription + metricsJson);
-
-        return cleanHtml(html);
-    }
-
-    private String generateViaClaude(String system, String userMessage) {
-        AnthropicClient client = AnthropicOkHttpClient.builder().apiKey(apiKey).build();
-
-        // Haiku 4.5 doesn't support adaptive thinking or the effort parameter (effort errors
-        // outright on this tier) - plain request, no thinking config.
-        MessageCreateParams params = MessageCreateParams.builder()
-                .model(MODEL)
-                .maxTokens(64000L)
-                .system(system)
-                .addUserMessage(userMessage)
-                .build();
-
-        StringBuilder html = new StringBuilder();
-        try (StreamResponse<RawMessageStreamEvent> stream = client.messages().createStreaming(params)) {
-            stream.stream()
-                    .flatMap(event -> event.contentBlockDelta().stream())
-                    .flatMap(deltaEvent -> deltaEvent.delta().text().stream())
-                    .forEach(textDelta -> html.append(textDelta.text()));
-        }
-        return html.toString();
-    }
-
-    /** Plain OpenAI-compatible chat completion call - OpenRouter needs no dedicated SDK, just
-     * a JSON POST, so this uses the JDK's own HttpClient rather than adding a dependency. */
-    private String generateViaOpenRouter(String model, String system, String userMessage) throws Exception {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", model);
-        body.put("messages", List.of(
-                Map.of("role", "system", "content", system),
-                Map.of("role", "user", "content", userMessage)
-        ));
-
-        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(OPENROUTER_URL))
-                .timeout(Duration.ofMinutes(5))
-                .header("Authorization", "Bearer " + openRouterApiKey)
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
-                .build();
-
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IllegalStateException("OpenRouter request failed (" + response.statusCode() + "): " + response.body());
-        }
-
-        JsonNode root = objectMapper.readTree(response.body());
-        JsonNode content = root.path("choices").path(0).path("message").path("content");
-        if (content.isMissingNode() || content.isNull()) {
-            throw new IllegalStateException("OpenRouter response had no content: " + response.body());
-        }
-        return content.asText();
+        AiService.AiReply reply = aiService.completeWithModel(AiFeature.REPORT, system,
+                List.of(Map.of("role", "user", "content", dataDescription + metricsJson)), MAX_TOKENS);
+        return new AiService.AiReply(cleanHtml(reply.text()), reply.model());
     }
 
     /** Claude sometimes wraps output in a markdown code fence despite instructions not to - strip it defensively. */

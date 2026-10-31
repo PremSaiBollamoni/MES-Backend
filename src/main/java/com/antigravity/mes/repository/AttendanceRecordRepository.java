@@ -12,6 +12,10 @@ import java.util.Optional;
 public interface AttendanceRecordRepository extends JpaRepository<AttendanceRecord, Long> {
     Optional<AttendanceRecord> findByEmployeeIdAndWorkDate(Long employeeId, LocalDate workDate);
     boolean existsByWorkDate(LocalDate workDate);
+    boolean existsByFactoryIdAndWorkDate(Long factoryId, LocalDate workDate);
     List<AttendanceRecord> findByWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(LocalDate from, LocalDate to);
     List<AttendanceRecord> findByEmployeeIdOrderByWorkDateDesc(Long employeeId);
+
+    List<AttendanceRecord> findByFactoryIdAndWorkDate(Long factoryId, LocalDate workDate);
+    List<AttendanceRecord> findByFactoryIdAndWorkDateBetweenOrderByWorkDateDescEmployeeNameAsc(Long factoryId, LocalDate from, LocalDate to);
 }

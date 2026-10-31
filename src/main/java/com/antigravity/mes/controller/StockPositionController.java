@@ -21,16 +21,19 @@ public class StockPositionController {
 
     @RequiresActivity("OPERATIONS")
     @GetMapping
-    public ResponseEntity<List<StockPositionResponse>> list(@RequestParam String date) {
-        return ResponseEntity.ok(stockPositionService.listForDate(LocalDate.parse(date)));
+    public ResponseEntity<List<StockPositionResponse>> list(
+            @RequestParam String date,
+            @RequestAttribute(required = false) Long factoryId) {
+        return ResponseEntity.ok(stockPositionService.listForDate(LocalDate.parse(date), factoryId));
     }
 
     @RequiresActivity("OPERATIONS")
     @PostMapping
     public ResponseEntity<StockPositionResponse> update(
             @RequestAttribute("employeeId") Long employeeId,
-            @RequestBody UpdateStockPositionRequest request) {
+            @RequestBody UpdateStockPositionRequest request,
+            @RequestAttribute(required = false) Long factoryId) {
         return ResponseEntity.ok(stockPositionService.update(
-                request.zoneCode(), request.positionDate(), request.openingBalance(), request.additions(), request.dispatched(), employeeId));
+                request.zoneCode(), request.positionDate(), request.openingBalance(), request.additions(), request.dispatched(), employeeId, factoryId));
     }
 }

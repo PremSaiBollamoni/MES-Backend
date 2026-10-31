@@ -22,7 +22,10 @@ public class Station {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "station_number", length = 20, nullable = false, unique = true)
+    @Column(name = "factory_id", nullable = false)
+    private Long factoryId;
+
+    @Column(name = "station_number", length = 20, nullable = false)
     private String stationNumber;
 
     @Column(name = "operation_name", length = 150, nullable = false)
@@ -71,6 +74,10 @@ public class Station {
     public Station() {}
 
     public Long getId() { return id; }
+
+    public Long getFactoryId() { return factoryId; }
+
+    public void setFactoryId(Long factoryId) { this.factoryId = factoryId; }
 
     public String getStationNumber() { return stationNumber; }
     public void setStationNumber(String stationNumber) { this.stationNumber = stationNumber; }

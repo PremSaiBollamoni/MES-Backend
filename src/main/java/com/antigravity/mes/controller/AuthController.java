@@ -40,6 +40,8 @@ public class AuthController {
      * Verifies username + password. An employee with exactly one active role logs in
      * immediately (unchanged behaviour). An employee with more than one active role gets
      * a role-selection prompt instead of a full session token - see {@link #selectRole}.
+     * No factory selection here: usernames are globally unique by policy, so the
+     * session's factory is resolved from the matched employee, not chosen by the caller.
      */
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody Map<String, String> loginRequest) {
@@ -153,9 +155,10 @@ public class AuthController {
         response.put("username", employee.getUsername());
         response.put("role", role.getRoleName());
         response.put("activities", role.getActivities());
-        response.put("token", jwtService.issueToken(employee.getId(), role.getRoleName()));
-        // Every role this employee currently holds (not just the active one) - lets the
-        // client show/hide "Switch Role" without a separate lookup.
+        response.put("factoryId", employee.getFactoryId());
+        boolean isSuperAdmin = role.isSuperAdmin();
+        response.put("isSuperAdmin", isSuperAdmin);
+        response.put("token", jwtService.issueToken(employee.getId(), role.getRoleName(), employee.getFactoryId(), isSuperAdmin));
         response.put("availableRoles", employee.getActiveRoles().stream().map(Role::getRoleName).sorted().toList());
         return response;
     }

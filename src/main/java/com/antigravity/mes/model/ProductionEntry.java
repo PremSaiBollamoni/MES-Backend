@@ -23,6 +23,9 @@ public class ProductionEntry {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "factory_id", nullable = false)
+    private Long factoryId;
+
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "employee_id", nullable = false)
     private Employee employee;
@@ -72,6 +75,10 @@ public class ProductionEntry {
     private LocalDateTime createdAt;
 
     public Long getId() { return id; }
+
+    public Long getFactoryId() { return factoryId; }
+
+    public void setFactoryId(Long factoryId) { this.factoryId = factoryId; }
 
     public Employee getEmployee() { return employee; }
     public void setEmployee(Employee employee) { this.employee = employee; }

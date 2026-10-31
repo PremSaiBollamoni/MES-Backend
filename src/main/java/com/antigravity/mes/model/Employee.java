@@ -13,7 +13,10 @@ public class Employee {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "username", length = 20, nullable = false, unique = true)
+    @Column(name = "factory_id", nullable = false)
+    private Long factoryId;
+
+    @Column(name = "username", length = 20, nullable = false)
     private String username;
 
     @Column(name = "password_hash", length = 255, nullable = false)
@@ -41,7 +44,8 @@ public class Employee {
 
     public Employee() {}
 
-    public Employee(String username, String passwordHash, String name, Set<Role> roles) {
+    public Employee(Long factoryId, String username, String passwordHash, String name, Set<Role> roles) {
+        this.factoryId = factoryId;
         this.username = username;
         this.passwordHash = passwordHash;
         this.name = name;
@@ -54,6 +58,14 @@ public class Employee {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public Long getFactoryId() {
+        return factoryId;
+    }
+
+    public void setFactoryId(Long factoryId) {
+        this.factoryId = factoryId;
     }
 
     public String getUsername() {

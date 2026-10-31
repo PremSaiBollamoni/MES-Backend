@@ -26,9 +26,15 @@ public class DashboardService {
     @Autowired
     private EmployeeInfoRepository employeeInfoRepository;
 
+    /**
+     * Scoped to the caller's factory - this was previously unfiltered (findAll()), the
+     * same class of cross-factory leak found and fixed in EmployeeManagementService.
+     */
     @Transactional(readOnly = true)
-    public DashboardSummaryResponse getSummary() {
-        List<Employee> employees = employeeRepository.findAll();
+    public DashboardSummaryResponse getSummary(Long factoryId) {
+        List<Employee> employees = employeeRepository.findByFactoryId(factoryId).stream()
+                .filter(e -> !e.hasActiveRoleNamed("SUPER_ADMIN"))
+                .toList();
         long total = employees.size();
         long active = employees.stream().filter(Employee::isActive).count();
         long inactive = total - active;
@@ -40,7 +46,7 @@ public class DashboardService {
                 .flatMap(e -> e.getRoles().stream())
                 .collect(Collectors.groupingBy(Role::getRoleName, Collectors.counting()));
 
-        List<EmployeeInfo> infos = employeeInfoRepository.findAll();
+        List<EmployeeInfo> infos = employeeInfoRepository.findByFactoryId(factoryId);
 
         Map<String, Long> byDepartment = infos.stream()
                 .map(i -> (i.getDepartment() == null || i.getDepartment().isBlank()) ? "Unassigned" : i.getDepartment())

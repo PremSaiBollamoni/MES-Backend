@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** AI-generated production reports (Claude/Opus 4.8) - management-facing, read-only for anyone
  * with the REPORTS activity. Generation is expensive (a real model call), so it's explicitly
@@ -28,12 +29,17 @@ public class ReportController {
     private ReportGenerationService reportGenerationService;
 
     @Autowired
+    private ReportJobService reportJobService;
+
+    @Autowired
     private PdfRenderingService pdfRenderingService;
 
     @RequiresActivity("REPORTS")
     @GetMapping
-    public ResponseEntity<List<ReportSummaryResponse>> list(@RequestParam(required = false, defaultValue = "PRODUCTION") ReportType type) {
-        return ResponseEntity.ok(reportGenerationService.listAll(type));
+    public ResponseEntity<List<ReportSummaryResponse>> list(
+            @RequestParam(required = false, defaultValue = "PRODUCTION") ReportType type,
+            @RequestAttribute(required = false) Long factoryId) {
+        return ResponseEntity.ok(reportGenerationService.listAll(type, factoryId));
     }
 
     @RequiresActivity("REPORTS")
@@ -44,25 +50,41 @@ public class ReportController {
             @RequestParam(required = false, defaultValue = "PRODUCTION") ReportType type,
             @RequestParam(required = false, defaultValue = "DAILY") PeriodType period,
             @RequestParam(required = false, defaultValue = "false") boolean force,
-            // Both optional: absent/blank falls back to the server-configured default
-            // provider/model (see application.properties). Lets a report be generated
-            // against a different provider or a replacement model with no redeploy.
-            @RequestParam(required = false) String provider,
-            @RequestParam(required = false) String model) {
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        LocalDate day = LocalDate.parse(date);
+        if (!force) {
+            Optional<ReportSummaryResponse> existing = reportGenerationService.findExisting(type, day, period, factoryId);
+            if (existing.isPresent()) return ResponseEntity.ok(existing.get());
+        }
         try {
-            return ResponseEntity.ok(reportGenerationService.generate(type, LocalDate.parse(date), period, force, employeeId, provider, model));
+            // 202: generation runs in the background. The app polls /generate/status until it is DONE or FAILED.
+            ReportJobService.JobView job = reportJobService.start(
+                    new ReportJobService.JobKey(factoryId, type, day, period), force, employeeId, Boolean.TRUE.equals(isSuperAdmin));
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(job);
         } catch (IllegalStateException e) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", e.getMessage()));
-        } catch (Exception e) {
-            log.error("Report generation failed for date {}", date, e);
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(Map.of("error", "Report generation failed: " + e.getMessage()));
         }
     }
 
     @RequiresActivity("REPORTS")
+    @GetMapping("/generate/status")
+    public ResponseEntity<ReportJobService.JobView> generateStatus(
+            @RequestParam String date,
+            @RequestParam(required = false, defaultValue = "PRODUCTION") ReportType type,
+            @RequestParam(required = false, defaultValue = "DAILY") PeriodType period,
+            @RequestAttribute(required = false) Long factoryId) {
+        return ResponseEntity.ok(reportJobService.status(
+                new ReportJobService.JobKey(factoryId, type, LocalDate.parse(date), period)));
+    }
+
+    @RequiresActivity("REPORTS")
     @GetMapping(value = "/{id}/pdf")
-    public ResponseEntity<byte[]> downloadPdf(@PathVariable Long id) {
-        GeneratedReport report = reportGenerationService.requireReport(id);
+    public ResponseEntity<byte[]> downloadPdf(
+            @PathVariable Long id,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        GeneratedReport report = reportGenerationService.requireReport(id, factoryId, Boolean.TRUE.equals(isSuperAdmin));
         try {
             byte[] pdf = pdfRenderingService.renderToPdf(report.getHtmlContent());
             return ResponseEntity.ok()

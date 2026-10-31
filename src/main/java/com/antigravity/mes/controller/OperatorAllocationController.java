@@ -23,26 +23,40 @@ public class OperatorAllocationController {
 
     @RequiresActivity("OPERATIONS")
     @GetMapping
-    public ResponseEntity<List<AllocationResponse>> list(@RequestParam String date) {
-        return ResponseEntity.ok(allocationService.listForDate(LocalDate.parse(date)));
+    public ResponseEntity<List<AllocationResponse>> list(
+            @RequestParam String date,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(allocationService.listForDate(LocalDate.parse(date), factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 
     @RequiresActivity("OPERATIONS")
     @GetMapping("/roster")
-    public ResponseEntity<List<RosterEntryResponse>> roster(@RequestParam String date) {
-        return ResponseEntity.ok(allocationService.rosterForDate(LocalDate.parse(date)));
+    public ResponseEntity<List<RosterEntryResponse>> roster(
+            @RequestParam String date,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(allocationService.rosterForDate(LocalDate.parse(date), factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 
     @RequiresActivity("OPERATIONS")
     @PostMapping
-    public ResponseEntity<AllocationResponse> assign(@RequestBody AssignAllocationRequest request) {
-        return ResponseEntity.ok(allocationService.assign(request.employeeId(), request.stationId(), request.shiftDate(), request.shift()));
+    public ResponseEntity<AllocationResponse> assign(
+            @RequestBody AssignAllocationRequest request,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(allocationService.assign(
+                request.employeeId(), request.stationId(), request.shiftDate(), request.shift(),
+                factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 
     @RequiresActivity("OPERATIONS")
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> unassign(@PathVariable Long id) {
-        allocationService.unassign(id);
+    public ResponseEntity<Void> unassign(
+            @PathVariable Long id,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        allocationService.unassign(id, factoryId, Boolean.TRUE.equals(isSuperAdmin));
         return ResponseEntity.noContent().build();
     }
 }

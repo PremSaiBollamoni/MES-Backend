@@ -31,22 +31,27 @@ public class AttendanceSyncService {
     @Autowired
     private AttendanceRecordRepository attendanceRecordRepository;
 
+    /** Pulls from whichever HRMS connection resolves for this factory (its own saved
+     * config, or the default env-var connection if it has none). A matched HRMS record
+     * is only saved if the local employee it maps to actually belongs to this same
+     * factory - guards against an hrms_employee_code collision across two factories'
+     * separate HRMS systems ever cross-writing another factory's attendance data. */
     @Transactional
-    public AttendanceSyncResult syncRange(LocalDate from, LocalDate to) {
+    public AttendanceSyncResult syncRange(Long factoryId, LocalDate from, LocalDate to) {
         int synced = 0;
         int unmatched = 0;
         int days = 0;
 
         for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
             days++;
-            List<HrmsDailyAttendance> dayRecords = hrmsClient.getDailyAttendance(date);
+            List<HrmsDailyAttendance> dayRecords = hrmsClient.getDailyAttendance(factoryId, date);
             for (HrmsDailyAttendance record : dayRecords) {
                 if (record.employeeCode() == null) {
                     unmatched++;
                     continue;
                 }
                 var infoOpt = employeeInfoRepository.findByHrmsEmployeeCode(record.employeeCode());
-                if (infoOpt.isEmpty()) {
+                if (infoOpt.isEmpty() || (factoryId != null && !factoryId.equals(infoOpt.get().getFactoryId()))) {
                     unmatched++;
                     continue;
                 }
@@ -64,6 +69,7 @@ public class AttendanceSyncService {
                 .findByEmployeeIdAndWorkDate(employeeId, date)
                 .orElseGet(AttendanceRecord::new);
 
+        entity.setFactoryId(info.getEmployee().getFactoryId());
         entity.setEmployeeId(employeeId);
         entity.setEmployeeName(info.getEmployee().getName());
         entity.setEmployeeCode(info.getEmployeeCode());

@@ -22,17 +22,22 @@ public class BundleTrackingController {
 
     @RequiresActivity("OPERATIONS")
     @GetMapping("/bundles")
-    public ResponseEntity<List<BundleResponse>> listActive() {
-        return ResponseEntity.ok(bundleTrackingService.listActive());
+    public ResponseEntity<List<BundleResponse>> listActive(
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(bundleTrackingService.listActive(factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 
     @RequiresActivity("OPERATIONS")
     @PostMapping("/bundles")
     public ResponseEntity<BundleResponse> createBundle(
             @RequestAttribute("employeeId") Long employeeId,
-            @RequestBody CreateBundleRequest request) {
+            @RequestBody CreateBundleRequest request,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
         return ResponseEntity.ok(bundleTrackingService.createBundle(
-                request.bundleRef(), request.quantity(), request.initialStationId(), employeeId));
+                request.bundleRef(), request.quantity(), request.initialStationId(), employeeId,
+                factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 
     @RequiresActivity("OPERATIONS")
@@ -40,21 +45,27 @@ public class BundleTrackingController {
     public ResponseEntity<BundleResponse> moveBundle(
             @PathVariable Long id,
             @RequestAttribute("employeeId") Long employeeId,
-            @RequestBody MoveBundleRequest request) {
-        return ResponseEntity.ok(bundleTrackingService.moveBundle(id, request.toStationId(), employeeId));
+            @RequestBody MoveBundleRequest request,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(bundleTrackingService.moveBundle(id, request.toStationId(), employeeId, factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 
     @RequiresActivity("OPERATIONS")
     @PostMapping("/bundles/{id}/complete")
     public ResponseEntity<BundleResponse> completeBundle(
             @PathVariable Long id,
-            @RequestAttribute("employeeId") Long employeeId) {
-        return ResponseEntity.ok(bundleTrackingService.completeBundle(id, employeeId));
+            @RequestAttribute("employeeId") Long employeeId,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(bundleTrackingService.completeBundle(id, employeeId, factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 
     @RequiresActivity("OPERATIONS")
     @GetMapping("/summary")
-    public ResponseEntity<List<StationWipSummary>> getWipSummary() {
-        return ResponseEntity.ok(bundleTrackingService.getWipSummary());
+    public ResponseEntity<List<StationWipSummary>> getWipSummary(
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(bundleTrackingService.getWipSummary(factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 }

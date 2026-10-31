@@ -26,27 +26,32 @@ public class StationManagementService {
     @Autowired
     private StationRepository stationRepository;
 
-    public List<StationResponse> listStations() {
-        return stationRepository.findAllByOrderByStationNumberAsc().stream().map(this::toResponse).toList();
+    /** SUPER_ADMIN sees every factory's stations; anyone else sees only their own. */
+    public List<StationResponse> listStations(Long factoryId, boolean isSuperAdmin) {
+        List<Station> stations = isSuperAdmin
+                ? stationRepository.findAllByOrderByStationNumberAsc()
+                : stationRepository.findByFactoryIdOrderByStationNumberAsc(factoryId);
+        return stations.stream().map(this::toResponse).toList();
     }
 
-    public StationResponse getStation(Long id) {
-        return toResponse(requireStation(id));
+    public StationResponse getStation(Long id, Long factoryId, boolean isSuperAdmin) {
+        return toResponse(requireStationInFactory(id, factoryId, isSuperAdmin));
     }
 
     @Transactional
-    public StationResponse createStation(StationCreateRequest request) {
+    public StationResponse createStation(StationCreateRequest request, Long factoryId) {
         if (isBlank(request.stationNumber())) {
             throw new IllegalArgumentException("Station number is required");
         }
         if (isBlank(request.operationName())) {
             throw new IllegalArgumentException("Operation name is required");
         }
-        if (stationRepository.findByStationNumber(request.stationNumber().trim()).isPresent()) {
+        if (stationRepository.findByFactoryIdAndStationNumber(factoryId, request.stationNumber().trim()).isPresent()) {
             throw new ConflictException("Station number already exists: " + request.stationNumber());
         }
 
         Station station = new Station();
+        station.setFactoryId(factoryId);
         station.setStationNumber(request.stationNumber().trim());
         station.setOperationName(request.operationName().trim());
         station.setZone(parseZone(request.zone()));
@@ -61,8 +66,8 @@ public class StationManagementService {
     }
 
     @Transactional
-    public StationResponse updateStation(Long id, StationUpdateRequest request) {
-        Station station = requireStation(id);
+    public StationResponse updateStation(Long id, StationUpdateRequest request, Long factoryId, boolean isSuperAdmin) {
+        Station station = requireStationInFactory(id, factoryId, isSuperAdmin);
 
         if (!isBlank(request.operationName())) {
             station.setOperationName(request.operationName().trim());
@@ -98,8 +103,8 @@ public class StationManagementService {
     }
 
     @Transactional
-    public void deleteStation(Long id) {
-        Station station = requireStation(id);
+    public void deleteStation(Long id, Long factoryId, boolean isSuperAdmin) {
+        Station station = requireStationInFactory(id, factoryId, isSuperAdmin);
         try {
             stationRepository.delete(station);
             stationRepository.flush();
@@ -109,12 +114,12 @@ public class StationManagementService {
     }
 
     /** Deletes each station independently, so one that's still referenced doesn't block the rest of the batch. */
-    public BulkDeleteResult deleteStations(List<Long> ids) {
+    public BulkDeleteResult deleteStations(List<Long> ids, Long factoryId, boolean isSuperAdmin) {
         int deleted = 0;
         List<BulkDeleteResult.BulkDeleteFailure> failures = new ArrayList<>();
         for (Long id : ids) {
             try {
-                deleteStation(id);
+                deleteStation(id, factoryId, isSuperAdmin);
                 deleted++;
             } catch (Exception e) {
                 failures.add(new BulkDeleteResult.BulkDeleteFailure(id, e.getMessage()));
@@ -134,6 +139,19 @@ public class StationManagementService {
     private Station requireStation(Long id) {
         return stationRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Station not found: " + id));
+    }
+
+    /**
+     * Same lookup, but also enforces factory ownership - a non-super-admin caller gets
+     * "not found" (not "forbidden") for a station in a different factory, so this
+     * endpoint can never be used to even confirm another factory's station ID exists.
+     */
+    private Station requireStationInFactory(Long id, Long factoryId, boolean isSuperAdmin) {
+        Station station = requireStation(id);
+        if (!isSuperAdmin && factoryId != null && !factoryId.equals(station.getFactoryId())) {
+            throw new NotFoundException("Station not found: " + id);
+        }
+        return station;
     }
 
     private boolean isBlank(String value) {

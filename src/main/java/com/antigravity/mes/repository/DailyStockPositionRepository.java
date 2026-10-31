@@ -13,4 +13,6 @@ public interface DailyStockPositionRepository extends JpaRepository<DailyStockPo
     List<DailyStockPosition> findByPositionDate(LocalDate positionDate);
     Optional<DailyStockPosition> findByZoneZoneCodeAndPositionDate(String zoneCode, LocalDate positionDate);
     List<DailyStockPosition> findByZoneZoneCodeAndPositionDateBetweenOrderByPositionDateAsc(String zoneCode, LocalDate from, LocalDate to);
+
+    Optional<DailyStockPosition> findByFactoryIdAndZoneZoneCodeAndPositionDate(Long factoryId, String zoneCode, LocalDate positionDate);
 }

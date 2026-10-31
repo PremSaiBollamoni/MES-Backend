@@ -21,17 +21,23 @@ public class StockAvailabilityController {
 
     @RequiresActivity("OPERATIONS")
     @GetMapping
-    public ResponseEntity<List<StockAvailabilityResponse>> list(@RequestParam String date) {
-        return ResponseEntity.ok(stockAvailabilityService.listForDate(LocalDate.parse(date)));
+    public ResponseEntity<List<StockAvailabilityResponse>> list(
+            @RequestParam String date,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
+        return ResponseEntity.ok(stockAvailabilityService.listForDate(LocalDate.parse(date), factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 
     @RequiresActivity("OPERATIONS")
     @PostMapping
     public ResponseEntity<StockAvailabilityResponse> log(
             @RequestAttribute("employeeId") Long employeeId,
-            @RequestBody LogStockAvailabilityRequest request) {
+            @RequestBody LogStockAvailabilityRequest request,
+            @RequestAttribute(required = false) Long factoryId,
+            @RequestAttribute(required = false) Boolean isSuperAdmin) {
         return ResponseEntity.ok(stockAvailabilityService.logStock(
                 request.stationId(), request.shiftDate(),
-                request.currentStockQty() == null ? 0 : request.currentStockQty(), request.reason(), employeeId));
+                request.currentStockQty() == null ? 0 : request.currentStockQty(), request.reason(), employeeId,
+                factoryId, Boolean.TRUE.equals(isSuperAdmin)));
     }
 }

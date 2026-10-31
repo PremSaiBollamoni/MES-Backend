@@ -57,24 +57,26 @@ public class EmployeeService {
             // employee also gets an employee_info row (department/designation/etc.) -
             // without it, the HR/Profile endpoints (which always join to employee_info)
             // would 404 for these accounts.
-            seed("MES001", "Amit Kumar", "FACTORY_MANAGER", "Management", "Factory Manager");
-            seed("MES002", "Rajesh Sharma", "PRODUCTION_SUPERVISOR", "Production", "Production Supervisor");
-            seed("MES003", "Sita Devi", "IE_ANALYST", "Industrial Engineering", "IE Analyst");
-            seed("MES004", "Vijay Singh", "OPERATOR", "Sewing", "Sewing Operator");
-            seed("MES005", "Priya Verma", "QC_INSPECTOR", "Quality Control", "QC Inspector");
-            seed("MES006", "Ravi Teja", "STORE_KEEPER", "Stores", "Store Keeper");
-            seed("MES007", "Meena Iyer", "HR_MANAGER", "Human Resources", "HR Manager");
+            // All seeded employees are assigned to factory_id = 1 (Default Factory)
+            seed(1L, "MES001", "Amit Kumar", "FACTORY_MANAGER", "Management", "Factory Manager");
+            seed(1L, "MES002", "Rajesh Sharma", "PRODUCTION_SUPERVISOR", "Production", "Production Supervisor");
+            seed(1L, "MES003", "Sita Devi", "IE_ANALYST", "Industrial Engineering", "IE Analyst");
+            seed(1L, "MES004", "Vijay Singh", "OPERATOR", "Sewing", "Sewing Operator");
+            seed(1L, "MES005", "Priya Verma", "QC_INSPECTOR", "Quality Control", "QC Inspector");
+            seed(1L, "MES006", "Ravi Teja", "STORE_KEEPER", "Stores", "Store Keeper");
+            seed(1L, "MES007", "Meena Iyer", "HR_MANAGER", "Human Resources", "HR Manager");
             System.out.println("Demo employees seeded successfully!");
         }
     }
 
-    private void seed(String username, String name, String roleName, String department, String designation) {
+    private void seed(Long factoryId, String username, String name, String roleName, String department, String designation) {
         Role role = roleRepository.findByRoleName(roleName)
                 .orElseThrow(() -> new IllegalStateException("Role not seeded: " + roleName));
         Employee employee = employeeRepository.save(
-                new Employee(username, passwordEncoder.encode(DEFAULT_PASSWORD), name, Set.of(role)));
+                new Employee(factoryId, username, passwordEncoder.encode(DEFAULT_PASSWORD), name, Set.of(role)));
 
         EmployeeInfo info = new EmployeeInfo();
+        info.setFactoryId(factoryId);
         info.setEmployee(employee);
         info.setEmployeeCode(username);
         info.setDepartment(department);
@@ -84,11 +86,14 @@ public class EmployeeService {
     }
 
     /**
-     * Authenticates by username + password. Failed attempts are rate-limited via a
-     * rolling lockout, and every attempt (success or failure) is recorded to
-     * {@code login_audit} for traceability. A disabled role (status = INACTIVE) is
-     * treated the same as a failed login - it never reveals to the caller *why*
-     * access was denied.
+     * Authenticates by username + password. Usernames are globally unique by policy
+     * (never reused across factories, even though the schema also permits per-factory
+     * scoping) - so the factory a session runs as is resolved from the matched
+     * employee's own record, not chosen by the caller. No login-time factory selection
+     * is needed. Failed attempts are rate-limited via a rolling lockout, and every
+     * attempt (success or failure) is recorded to {@code login_audit} for traceability.
+     * A disabled role (status = INACTIVE) is treated the same as a failed login - it
+     * never reveals to the caller *why* access was denied.
      */
     public Optional<Employee> authenticate(String username, String password) {
         String normalizedUsername = username == null ? "" : username.trim().toUpperCase();

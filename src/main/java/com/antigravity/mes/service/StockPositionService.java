@@ -24,22 +24,29 @@ public class StockPositionService {
     @Autowired
     private DailyStockPositionRepository positionRepository;
 
-    public List<StockPositionResponse> listForDate(LocalDate date) {
+    /**
+     * Zones themselves (FGS, WSH, ...) are a shared global catalogue, same as roles -
+     * every factory sees the same zone list. The daily position numbers logged against
+     * them are factory-scoped - this was previously unfiltered (every factory's entries
+     * for a zone+date were indistinguishable, sharing one global row).
+     */
+    public List<StockPositionResponse> listForDate(LocalDate date, Long factoryId) {
         return stockZoneRepository.findAllByOrderBySequenceNoAsc().stream()
-                .map(zone -> toResponseForDate(zone, date))
+                .map(zone -> toResponseForDate(zone, date, factoryId))
                 .toList();
     }
 
     @Transactional
-    public StockPositionResponse update(String zoneCode, LocalDate date, Integer openingBalanceOverride, int additions, int dispatched, Long enteredByEmployeeId) {
+    public StockPositionResponse update(String zoneCode, LocalDate date, Integer openingBalanceOverride, int additions, int dispatched, Long enteredByEmployeeId, Long factoryId) {
         StockZone zone = stockZoneRepository.findById(zoneCode)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown zone: " + zoneCode));
 
-        DailyStockPosition record = positionRepository.findByZoneZoneCodeAndPositionDate(zoneCode, date)
+        DailyStockPosition record = positionRepository.findByFactoryIdAndZoneZoneCodeAndPositionDate(factoryId, zoneCode, date)
                 .orElseGet(DailyStockPosition::new);
+        record.setFactoryId(factoryId);
         record.setZone(zone);
         record.setPositionDate(date);
-        record.setOpeningBalance(openingBalanceOverride != null ? openingBalanceOverride : carryForwardOpening(zoneCode, date));
+        record.setOpeningBalance(openingBalanceOverride != null ? openingBalanceOverride : carryForwardOpening(zoneCode, date, factoryId));
         record.setAdditions(additions);
         record.setDispatched(dispatched);
         record.setEnteredByEmployeeId(enteredByEmployeeId);
@@ -48,17 +55,17 @@ public class StockPositionService {
         return toResponse(zone, saved.getPositionDate(), saved.getOpeningBalance(), saved.getAdditions(), saved.getDispatched());
     }
 
-    private StockPositionResponse toResponseForDate(StockZone zone, LocalDate date) {
-        return positionRepository.findByZoneZoneCodeAndPositionDate(zone.getZoneCode(), date)
+    private StockPositionResponse toResponseForDate(StockZone zone, LocalDate date, Long factoryId) {
+        return positionRepository.findByFactoryIdAndZoneZoneCodeAndPositionDate(factoryId, zone.getZoneCode(), date)
                 .map(record -> toResponse(zone, date, record.getOpeningBalance(), record.getAdditions(), record.getDispatched()))
-                .orElseGet(() -> toResponse(zone, date, carryForwardOpening(zone.getZoneCode(), date), 0, 0));
+                .orElseGet(() -> toResponse(zone, date, carryForwardOpening(zone.getZoneCode(), date, factoryId), 0, 0));
     }
 
     /** A day with no entry yet starts from yesterday's closing balance, not zero - stock doesn't
      * reset overnight (PALMS §6 is a running ledger, RTM explicitly says so in §19 but it holds
      * for every zone in practice). */
-    private int carryForwardOpening(String zoneCode, LocalDate date) {
-        return positionRepository.findByZoneZoneCodeAndPositionDate(zoneCode, date.minusDays(1))
+    private int carryForwardOpening(String zoneCode, LocalDate date, Long factoryId) {
+        return positionRepository.findByFactoryIdAndZoneZoneCodeAndPositionDate(factoryId, zoneCode, date.minusDays(1))
                 .map(DailyStockPosition::getClosingBalance)
                 .orElse(0);
     }

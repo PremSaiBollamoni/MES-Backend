@@ -15,8 +15,10 @@ import com.antigravity.mes.hrms.dto.HrmsEmployeeOut;
 import com.antigravity.mes.model.Employee;
 import com.antigravity.mes.model.EmployeeInfo;
 import com.antigravity.mes.model.Role;
+import com.antigravity.mes.model.Factory;
 import com.antigravity.mes.repository.EmployeeInfoRepository;
 import com.antigravity.mes.repository.EmployeeRepository;
+import com.antigravity.mes.repository.FactoryRepository;
 import com.antigravity.mes.repository.RoleRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.DependsOn;
@@ -51,25 +53,38 @@ public class EmployeeManagementService {
     private RoleRepository roleRepository;
 
     @Autowired
+    private FactoryRepository factoryRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @Autowired
     private HrmsSyncService hrmsSyncService;
 
-    public List<EmployeeSummaryResponse> listEmployees() {
+    /**
+     * SUPER_ADMIN sees every factory's employees; anyone else sees only their own
+     * factory's - this was previously unfiltered (a real cross-factory data leak).
+     * SUPER_ADMIN accounts themselves are always excluded: they carry a placeholder
+     * factory_id (the employees table requires one) but are a system-wide login, not
+     * a factory's HR-managed employee, and must never appear in - or be touched by -
+     * any factory-scoped employee list, edit, or username-renumbering action.
+     */
+    public List<EmployeeSummaryResponse> listEmployees(Long factoryId, boolean isSuperAdmin) {
         return employeeRepository.findAll().stream()
+                .filter(employee -> !employee.hasActiveRoleNamed("SUPER_ADMIN"))
+                .filter(employee -> isSuperAdmin || factoryId == null || factoryId.equals(employee.getFactoryId()))
                 .map(employee -> toSummary(employee, employeeInfoRepository.findByEmployeeId(employee.getId()).orElse(null)))
                 .toList();
     }
 
-    public EmployeeDetailResponse getEmployee(Long id) {
-        Employee employee = requireEmployee(id);
+    public EmployeeDetailResponse getEmployee(Long id, Long factoryId, boolean isSuperAdmin) {
+        Employee employee = requireEmployeeInFactory(id, factoryId, isSuperAdmin);
         EmployeeInfo info = requireInfo(id);
         return toDetail(employee, info);
     }
 
     @Transactional
-    public EmployeeDetailResponse createEmployee(EmployeeCreateRequest request) {
+    public EmployeeDetailResponse createEmployee(EmployeeCreateRequest request, Long factoryId) {
         if (isBlank(request.name())) {
             throw new IllegalArgumentException("Name is required");
         }
@@ -84,13 +99,15 @@ public class EmployeeManagementService {
 
         String password = isBlank(request.password()) ? EmployeeService.DEFAULT_PASSWORD : request.password();
         Employee employee = new Employee(
-                generateNextUsername(),
+                factoryId,
+                generateNextUsername(factoryId),
                 passwordEncoder.encode(password),
                 request.name(),
                 Set.of(role));
         employee = employeeRepository.save(employee);
 
         EmployeeInfo info = new EmployeeInfo();
+        info.setFactoryId(factoryId);
         info.setEmployee(employee);
         info.setEmployeeCode(request.employeeCode());
         info.setDepartment(request.department());
@@ -113,13 +130,13 @@ public class EmployeeManagementService {
         info.setIfscCode(request.ifscCode());
         info = employeeInfoRepository.save(info);
 
-        applyHrmsSyncResult(info, hrmsSyncService.syncNewEmployee(employee, info));
+        applyHrmsSyncResult(info, hrmsSyncService.syncNewEmployee(employee, info), factoryId);
 
         return toDetail(employee, info);
     }
 
-    private void applyHrmsSyncResult(EmployeeInfo info, HrmsEmployeeOut synced) {
-        if (!hrmsSyncService.isEnabled()) {
+    private void applyHrmsSyncResult(EmployeeInfo info, HrmsEmployeeOut synced, Long factoryId) {
+        if (!hrmsSyncService.isEnabled(factoryId)) {
             return;
         }
         if (synced == null) {
@@ -136,7 +153,7 @@ public class EmployeeManagementService {
 
     /** Pulls an employee that was created directly in HRMS (not through this app) into our system. */
     @Transactional
-    public EmployeeDetailResponse importFromHrms(ImportFromHrmsRequest request) {
+    public EmployeeDetailResponse importFromHrms(ImportFromHrmsRequest request, Long factoryId) {
         if (isBlank(request.name())) {
             throw new IllegalArgumentException("Name is required");
         }
@@ -150,13 +167,15 @@ public class EmployeeManagementService {
         }
 
         Employee employee = new Employee(
-                generateNextUsername(),
+                factoryId,
+                generateNextUsername(factoryId),
                 passwordEncoder.encode(EmployeeService.DEFAULT_PASSWORD),
                 request.name(),
                 Set.of(role));
         employee = employeeRepository.save(employee);
 
         EmployeeInfo info = new EmployeeInfo();
+        info.setFactoryId(factoryId);
         info.setEmployee(employee);
         info.setEmployeeCode(request.employeeCode());
         info.setDesignation(request.designation());
@@ -178,14 +197,14 @@ public class EmployeeManagementService {
      * employee code) never stops the rest of the batch.
      */
     @Transactional
-    public BulkImportResult importAllFromHrms(String defaultRoleCode, String defaultDepartment) {
+    public BulkImportResult importAllFromHrms(String defaultRoleCode, String defaultDepartment, Long factoryId) {
         validateRole(defaultRoleCode);
         boolean overrideDepartment = !isBlank(defaultDepartment);
 
         List<EmployeeDetailResponse> imported = new ArrayList<>();
         List<BulkImportResult.BulkImportFailure> failed = new ArrayList<>();
 
-        for (HrmsEmployeeOut hrmsEmployee : hrmsSyncService.listUnlinkedEmployees()) {
+        for (HrmsEmployeeOut hrmsEmployee : hrmsSyncService.listUnlinkedEmployees(factoryId)) {
             try {
                 EmployeeDetailResponse created = importFromHrms(new ImportFromHrmsRequest(
                         hrmsEmployee.id(),
@@ -195,7 +214,7 @@ public class EmployeeManagementService {
                         hrmsEmployee.designation(),
                         overrideDepartment ? defaultDepartment : hrmsEmployee.departmentName(),
                         defaultRoleCode,
-                        hrmsEmployee.employeeCode()));
+                        hrmsEmployee.employeeCode()), factoryId);
                 imported.add(created);
             } catch (Exception e) {
                 failed.add(new BulkImportResult.BulkImportFailure(
@@ -206,17 +225,18 @@ public class EmployeeManagementService {
     }
 
     /** Uploads a photo for HRMS face-recognition enrollment - the employee must already be synced. */
-    public void enrollFace(Long employeeId, byte[] fileBytes, String filename) {
+    public void enrollFace(Long employeeId, byte[] fileBytes, String filename, Long factoryId, boolean isSuperAdmin) {
+        requireEmployeeInFactory(employeeId, factoryId, isSuperAdmin);
         EmployeeInfo info = requireInfo(employeeId);
         if (info.getHrmsEmployeeId() == null) {
             throw new IllegalArgumentException("This employee isn't synced to HRMS yet - face enrollment isn't available");
         }
-        hrmsSyncService.enrollFace(info.getHrmsEmployeeId(), fileBytes, filename);
+        hrmsSyncService.enrollFace(factoryId, info.getHrmsEmployeeId(), fileBytes, filename);
     }
 
     @Transactional
-    public EmployeeDetailResponse updateEmployee(Long id, EmployeeUpdateRequest request) {
-        Employee employee = requireEmployee(id);
+    public EmployeeDetailResponse updateEmployee(Long id, EmployeeUpdateRequest request, Long factoryId, boolean isSuperAdmin) {
+        Employee employee = requireEmployeeInFactory(id, factoryId, isSuperAdmin);
         EmployeeInfo info = requireInfo(id);
 
         if (!isBlank(request.password())) {
@@ -267,8 +287,8 @@ public class EmployeeManagementService {
 
     /** Replaces the employee's full role set - the "Assign Roles" action on the employee detail screen. */
     @Transactional
-    public EmployeeDetailResponse assignRoles(Long id, List<String> roleCodes) {
-        Employee employee = requireEmployee(id);
+    public EmployeeDetailResponse assignRoles(Long id, List<String> roleCodes, Long factoryId, boolean isSuperAdmin) {
+        Employee employee = requireEmployeeInFactory(id, factoryId, isSuperAdmin);
         EmployeeInfo info = requireInfo(id);
         if (roleCodes == null || roleCodes.isEmpty()) {
             throw new IllegalArgumentException("At least one role is required");
@@ -283,8 +303,8 @@ public class EmployeeManagementService {
     }
 
     @Transactional
-    public void setActive(Long id, boolean active) {
-        Employee employee = requireEmployee(id);
+    public void setActive(Long id, boolean active, Long factoryId, boolean isSuperAdmin) {
+        Employee employee = requireEmployeeInFactory(id, factoryId, isSuperAdmin);
         employee.setActive(active);
         employeeRepository.save(employee);
     }
@@ -295,8 +315,8 @@ public class EmployeeManagementService {
      * once those modules exist) rather than surfacing a raw SQL constraint error.
      */
     @Transactional
-    public void deleteEmployee(Long id) {
-        Employee employee = requireEmployee(id);
+    public void deleteEmployee(Long id, Long factoryId, boolean isSuperAdmin) {
+        Employee employee = requireEmployeeInFactory(id, factoryId, isSuperAdmin);
         try {
             employeeRepository.delete(employee);
             employeeRepository.flush();
@@ -307,12 +327,12 @@ public class EmployeeManagementService {
     }
 
     /** Deletes each employee independently, so one with blocking associations doesn't stop the rest of the batch. */
-    public BulkDeleteResult deleteEmployees(List<Long> ids) {
+    public BulkDeleteResult deleteEmployees(List<Long> ids, Long factoryId, boolean isSuperAdmin) {
         int deleted = 0;
         List<BulkDeleteResult.BulkDeleteFailure> failures = new ArrayList<>();
         for (Long id : ids) {
             try {
-                deleteEmployee(id);
+                deleteEmployee(id, factoryId, isSuperAdmin);
                 deleted++;
             } catch (Exception e) {
                 failures.add(new BulkDeleteResult.BulkDeleteFailure(id, e.getMessage()));
@@ -359,9 +379,79 @@ public class EmployeeManagementService {
         employeeRepository.save(employee);
     }
 
+    /**
+     * Renumbers every employee in a factory to {@code <factoryCode><seq>} (e.g.
+     * GTGBZA001, GTGBZA002, ...), ordered by employee id so the sequence is stable
+     * and repeatable. Uses a two-phase rename (temporary placeholder usernames first,
+     * then final ones) because usernames are globally unique - assigning final values
+     * directly, one row at a time, can collide with another employee's *current*
+     * username mid-batch even though the end state has no duplicates.
+     *
+     * This changes real login credentials. The caller is responsible for getting the
+     * returned old->new mapping to HR so affected employees can be told their new
+     * username before they're locked out of their old one.
+     */
+    @Transactional
+    public List<UsernameChange> fixUsernamesForFactory(Long factoryId) {
+        Factory factory = factoryRepository.findById(factoryId)
+                .orElseThrow(() -> new NotFoundException("Factory not found: " + factoryId));
+        String prefix = factory.getFactoryCode();
+        if (isBlank(prefix)) {
+            throw new IllegalArgumentException("This factory has no factory code set - set one first");
+        }
+
+        // SUPER_ADMIN accounts carry this factory's id as a placeholder but are not
+        // real factory employees - never renumber them.
+        List<Employee> employees = employeeRepository.findByFactoryId(factoryId).stream()
+                .filter(e -> !e.hasActiveRoleNamed("SUPER_ADMIN"))
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        employees.sort(Comparator.comparing(Employee::getId));
+
+        List<String> oldUsernames = employees.stream().map(Employee::getUsername).toList();
+
+        // Phase 1: move everyone in this factory to a collision-proof placeholder.
+        for (Employee e : employees) {
+            e.setUsername("__TMP__" + e.getId());
+        }
+        employeeRepository.saveAll(employees);
+        employeeRepository.flush();
+
+        // Phase 2: assign final sequential, factory-code-prefixed usernames. Only
+        // employees whose username actually changes are reported back - a re-run on an
+        // already-fixed factory should report zero changes, not everyone unconditionally.
+        List<UsernameChange> changes = new ArrayList<>();
+        int seq = 1;
+        for (int i = 0; i < employees.size(); i++) {
+            Employee e = employees.get(i);
+            String newUsername = String.format("%s%03d", prefix, seq++);
+            e.setUsername(newUsername);
+            if (!oldUsernames.get(i).equals(newUsername)) {
+                changes.add(new UsernameChange(e.getId(), e.getName(), oldUsernames.get(i), newUsername));
+            }
+        }
+        employeeRepository.saveAll(employees);
+
+        return changes;
+    }
+
+    public record UsernameChange(Long employeeId, String employeeName, String oldUsername, String newUsername) {}
+
     private Employee requireEmployee(Long id) {
         return employeeRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Employee not found: " + id));
+    }
+
+    /**
+     * Same lookup, but also enforces factory ownership - a non-super-admin caller gets
+     * "not found" (not "forbidden") for an employee in a different factory, so this
+     * endpoint can never be used to even confirm another factory's employee ID exists.
+     */
+    private Employee requireEmployeeInFactory(Long id, Long factoryId, boolean isSuperAdmin) {
+        Employee employee = requireEmployee(id);
+        if (!isSuperAdmin && factoryId != null && !factoryId.equals(employee.getFactoryId())) {
+            throw new NotFoundException("Employee not found: " + id);
+        }
+        return employee;
     }
 
     private EmployeeInfo requireInfo(Long employeeId) {
@@ -369,23 +459,36 @@ public class EmployeeManagementService {
                 .orElseThrow(() -> new NotFoundException("Employee info not found for employee: " + employeeId));
     }
 
-    /** Next sequential MES### username, e.g. MES001, MES002, ... MES1000. */
-    private String generateNextUsername() {
+    /**
+     * Next sequential username scoped to the employee's factory, prefixed with that
+     * factory's own code - e.g. factory code GTGBZA produces GTGBZA001, GTGBZA002, ...
+     * Falls back to "MES" if the factory has no code yet (shouldn't happen - factoryCode
+     * is required at factory creation) so employee creation never hard-fails on this.
+     * Usernames are globally unique by policy, so the search for the next number scans
+     * every employee's username (not just this factory's) that starts with the prefix.
+     */
+    private String generateNextUsername(Long factoryId) {
+        String prefix = factoryRepository.findById(factoryId)
+                .map(Factory::getFactoryCode)
+                .filter(code -> code != null && !code.isBlank())
+                .orElse("MES");
+
         int maxSeq = employeeRepository.findAll().stream()
                 .map(Employee::getUsername)
-                .filter(u -> u != null && u.startsWith("MES"))
+                .filter(u -> u != null && u.startsWith(prefix))
                 .mapToInt(u -> {
                     try {
-                        return Integer.parseInt(u.substring(3));
+                        return Integer.parseInt(u.substring(prefix.length()));
                     } catch (NumberFormatException e) {
                         return 0;
                     }
                 })
                 .max()
                 .orElse(0);
-        return String.format("MES%03d", maxSeq + 1);
+        return String.format("%s%03d", prefix, maxSeq + 1);
     }
 
+    /** Roles are global - shared and identically named across every factory. */
     private Role validateRole(String roleName) {
         if (isBlank(roleName)) {
             throw new IllegalArgumentException("Role is required");

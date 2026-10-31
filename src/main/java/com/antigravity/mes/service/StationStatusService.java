@@ -37,10 +37,15 @@ public class StationStatusService {
     @Autowired
     private AttendanceAvailabilityService attendanceAvailabilityService;
 
-    public List<StationStatusResponse> getStatusForDate(LocalDate date) {
-        attendanceAvailabilityService.ensureSyncedForDate(date);
+    /** SUPER_ADMIN sees every factory's station status; anyone else sees only their own -
+     * this was previously unfiltered. */
+    public List<StationStatusResponse> getStatusForDate(LocalDate date, Long factoryId, boolean isSuperAdmin) {
+        attendanceAvailabilityService.ensureSyncedForDate(factoryId, date);
 
-        List<Station> activeStations = stationRepository.findAllByOrderByStationNumberAsc().stream()
+        List<Station> allStations = isSuperAdmin
+                ? stationRepository.findAllByOrderByStationNumberAsc()
+                : stationRepository.findByFactoryIdOrderByStationNumberAsc(factoryId);
+        List<Station> activeStations = allStations.stream()
                 .filter(Station::isActive)
                 .toList();
 
